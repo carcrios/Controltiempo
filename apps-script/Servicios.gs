@@ -675,3 +675,30 @@ function registrarAcciones_() {
    ['adminRespaldar', A, 1, a_adminRespaldar], ['adminExportar', A, 0, a_adminExportar]
   ].forEach(function (x) { accion_(x[0], x[1], !!x[2], x[3]); });
 }
+
+
+// [NUEVO] Uso de LockService para manejar concurrencia
+function conBloqueo(callback) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000); // 10 segundos de espera
+    return callback();
+  } catch (e) {
+    throw new Error("El sistema está muy concurrido. Intenta de nuevo.");
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// [NUEVO] Registro de Auditoría para cambios manuales
+function registrarAuditoria(usuario, accion, detalle) {
+  conBloqueo(function() {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var hoja = ss.getSheetByName("Auditoria");
+    if (!hoja) {
+      hoja = ss.insertSheet("Auditoria");
+      hoja.appendRow(["Fecha", "Usuario", "Acción", "Detalle"]);
+    }
+    hoja.appendRow([new Date(), usuario, accion, detalle]);
+  });
+}

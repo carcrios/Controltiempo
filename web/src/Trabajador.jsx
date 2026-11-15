@@ -273,6 +273,19 @@ function Perfil({ yo, recargar, alSalir }) {
   </div>;
 }
 
+
+  // [NUEVO] Obtener geolocalización
+  const obtenerUbicacion = () => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve(`${pos.coords.latitude},${pos.coords.longitude}`),
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    });
+  };
+
 export default function Trabajador({ yo, actualizar, recargar, alSalir }) {
   const [tab, setTab] = useState('inicio');
   const tabs = [['inicio', 'Jornada', Clock], ['permisos', 'Permisos', CalendarDays], ['pagos', 'Pagos', Wallet], ['perfil', 'Perfil', UserRound]];
