@@ -1,5 +1,6 @@
-// ÚNICO archivo que se edita al instalar para una empresa.
-// Pega aquí la URL de la aplicación web de Apps Script (termina en /exec).
+// Déjalo vacío para que cada empresa entre con su propio enlace (#/c/<código>), que entrega el menú
+// «Control de jornada → 2. Ver el enlace de mi empresa» de su hoja de cálculo.
+// Solo si esta página es para UNA empresa, pega aquí su dirección de Apps Script (termina en /exec).
 window.CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbz9xeiAzbu9yYuH0QLnXrYukuWj3JN6AzvkjicrqkJqD_N6R1YnhLSqVtfCl1LxqEM/exec'
+  API_URL: ''
 };

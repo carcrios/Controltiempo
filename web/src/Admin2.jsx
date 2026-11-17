@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CalendarCheck, Check, Download, Lock, MessageCircle, Pencil, Plus, RefreshCw, Save, Stethoscope, Timer, X, DatabaseBackup, FileText } from 'lucide-react';
+import { CalendarCheck, Check, Download, Lock, MessageCircle, Pencil, Plus, RefreshCw, Save, Stethoscope, Timer, X, DatabaseBackup, FileText, CheckCheck, Trash2 } from 'lucide-react';
 import { api, VERSION } from './api.js';
 import { Aviso, Boton, Campo, Casilla, Confirmar, Estado, Hoja, Insignia, Pestanas, Tabla, Tarjeta, Vacio, useAvisos, useCarga, useForm } from './ui.jsx';
 import { comprimirArchivo, fechaCorta, fechaHora, horas, horasDec, hoyISO, pesos, sumarDias } from './util.js';
@@ -8,19 +8,19 @@ import { Desprendible, Liquidacion, enlaceWhatsApp, textoPermiso } from './Traba
 import { Rango, Titulo, aExcel, periodoActual, useAccion } from './Admin.jsx';
 
 /* ---------- Permisos ---------- */
-export function Permisos() {
-  const carga = useCarga(() => api('adminPermisos'), []), [filtro, setFiltro] = useState('pendientes'), [sel, setSel] = useState(null), [obs, setObs] = useState(''), [rem, setRem] = useState(true), [correr, ocupado] = useAccion();
+export function Permisos({ soloVer }) {
+  const [reg, setReg] = useState(false), carga = useCarga(() => api('adminPermisos'), []), [filtro, setFiltro] = useState('pendientes'), [sel, setSel] = useState(null), [obs, setObs] = useState(''), [rem, setRem] = useState(true), [correr, ocupado] = useAccion();
   const abrir = (p) => { setSel(p); setObs(''); setRem(p.remunerado); };
   const decidir = async (decision) => { if (await correr(() => api('adminPermisoDecidir', { id: sel.id, decision, obs, remunerado: rem }), decision === 'aprobar' ? 'Permiso aprobado: ya cuenta para la nómina.' : 'Permiso rechazado.')) { setSel(null); carga.recargar(true); } };
   const sinFirmas = sel && sel.estado !== 'firmado';
-  return <><Titulo t="Permisos">Un permiso solo afecta la nómina cuando tú lo apruebas aquí, después de las firmas de los jefes.</Titulo>
+  return <><Titulo t="Permisos" accion={!soloVer && <Boton variante="secundario" icono={Plus} onClick={() => setReg(true)}>Registrar a nombre de un trabajador</Boton>}>{soloVer ? 'Permisos de tu equipo y su estado. La aprobación final la da el administrador.' : 'Un permiso solo afecta la nómina cuando tú lo apruebas aquí, después de las firmas de los jefes.'}</Titulo>
     <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Filtro de permisos" valor={filtro} alCambiar={setFiltro} opciones={[{ v: 'pendientes', t: 'Por decidir' }, { v: 'en_firmas', t: 'En firmas' }, { v: 'todos', t: 'Todos' }]} /></div>
     <Estado carga={carga}>{(l) => <Tabla columnas={[
       { k: 'nombre', t: 'Persona', render: (p) => <strong>{p.nombre}</strong> }, { k: 'tipoNombre', t: 'Tipo', render: (p) => <>{p.tipoNombre}<div className="suave chico">{p.remunerado ? 'Remunerado' : 'No remunerado'}</div></> },
       { k: 'fechaSalida', t: 'Sale', render: (p) => `${fechaCorta(p.fechaSalida)} ${p.horaSalida}` }, { k: 'fechaRegreso', t: 'Regresa', render: (p) => `${fechaCorta(p.fechaRegreso)} ${p.horaRegreso}` },
       { k: 'firmas', t: 'Firmas', orden: false, render: (p) => p.firmas.length ? `${p.firmas.filter((f) => f.estado === 'aprobado').length} de ${p.firmas.length}` : '—' },
       { k: 'estado', t: 'Estado', render: (p) => <Insignia tono={tonoPermiso[p.estado]}>{nombreEstado[p.estado]}</Insignia>, texto: (p) => nombreEstado[p.estado] },
-      { k: 'a', t: '', acciones: true, orden: false, render: (p) => <Boton chico variante={['firmado', 'vencido'].includes(p.estado) ? 'primario' : 'secundario'} onClick={() => abrir(p)}>{['firmado', 'vencido'].includes(p.estado) ? 'Decidir' : 'Ver'}</Boton> }]}
+      { k: 'a', t: '', acciones: true, orden: false, render: (p) => <Boton chico variante={!soloVer && ['firmado', 'vencido'].includes(p.estado) ? 'primario' : 'secundario'} onClick={() => abrir(p)}>{!soloVer && ['firmado', 'vencido'].includes(p.estado) ? 'Decidir' : 'Ver'}</Boton> }]}
       filas={l.filter((p) => filtro === 'todos' || (filtro === 'pendientes' ? ['firmado', 'vencido'].includes(p.estado) : p.estado === 'en_firmas'))} clave={(p) => p.id}
       vacio={filtro === 'pendientes' ? 'No hay permisos esperando tu decisión.' : 'No hay permisos en esta lista.'} />}</Estado>
     <Hoja abierta={!!sel} alCerrar={() => setSel(null)} titulo="Solicitud de permiso" alto={0.92}>{sel && <>
@@ -30,12 +30,30 @@ export function Permisos() {
       {sel.firmas.length === 0 ? <Aviso tono="aviso">No hay jefes configurados para este centro. Agrégalos en Configuración → Jefes que firman.</Aviso> :
         <ul className="lista">{sel.firmas.map((f) => <li key={f.id}><div className="crece"><strong>{f.nombre}</strong><div className="suave chico">{f.cargo}{f.fecha ? ` · ${fechaHora(f.fecha)}` : ''}{f.obs ? ` · ${f.obs}` : ''}</div>{f.firma && <img src={f.firma} alt={`Firma de ${f.nombre}`} style={{ height: 48, background: '#fff', borderRadius: 6, marginTop: 4 }} />}</div>
           {f.estado === 'pendiente' && f.enlace && f.whatsapp ? <a className="btn secundario chico" href={enlaceWhatsApp(f.whatsapp, textoPermiso(sel, f))} target="_blank" rel="noreferrer"><MessageCircle size={16} aria-hidden="true" />Recordar</a> : <Insignia tono={f.estado === 'aprobado' ? 'ok' : f.estado === 'rechazado' ? 'peligro' : 'aviso'}>{f.estado}</Insignia>}</li>)}</ul>}
-      {['firmado', 'en_firmas', 'vencido'].includes(sel.estado) && <>
+      {!soloVer && ['firmado', 'en_firmas', 'vencido'].includes(sel.estado) && <>
         {sinFirmas && <Aviso tono="aviso">Faltan firmas. Puedes decidir sin ellas, pero debes escribir la justificación; queda en auditoría.</Aviso>}
         {!['ley', 'vacaciones'].includes(sel.cat) && <Casilla checked={rem} onChange={(e) => setRem(e.target.checked)}>Permiso remunerado (si no, se descuenta el tiempo)</Casilla>}
         <Campo como="textarea" etiqueta={sinFirmas ? 'Justificación' : 'Observación (obligatoria si rechazas)'} value={obs} onChange={(e) => setObs(e.target.value)} maxLength={300} />
         <div className="acciones-hoja"><Boton variante="peligro" icono={X} cargando={ocupado} disabled={obs.trim().length < 5} onClick={() => decidir('rechazar')}>Rechazar</Boton><Boton icono={Check} cargando={ocupado} disabled={sinFirmas && obs.trim().length < 5} onClick={() => decidir('aprobar')}>Aprobar</Boton></div></>}
-    </>}</Hoja></>;
+    </>}</Hoja>
+    <RegistrarPermiso abierta={reg} alCerrar={() => setReg(false)} alListo={() => { setReg(false); carga.recargar(true); }} /></>;
+}
+
+function RegistrarPermiso({ abierta, alCerrar, alListo }) {
+  const personas = useCarga(() => (abierta ? api('adminPersonal') : Promise.resolve([])), [abierta]), [cat, setCat] = useState([]), [f, campo, setF] = useForm({}), [correr, ocupado] = useAccion();
+  useEffect(() => { if (abierta) { setF({ cedula: '', tipo: 'vacaciones', fechaSalida: hoyISO(), horaSalida: '', fechaRegreso: hoyISO(), horaRegreso: '', motivo: '', remunerado: false }); setCat((window.__yo && window.__yo.permisosCat) || []); } }, [abierta]); // eslint-disable-line
+  const guardar = async () => { if (await correr(() => api('adminPermisoRegistrar', f), 'Registrado y aprobado.')) alListo(); };
+  const c = cat.find((x) => x.id === f.tipo);
+  return <Hoja abierta={abierta} alCerrar={alCerrar} titulo="Registrar permiso o vacaciones" alto={0.92}>
+    <p className="suave chico">Para lo que ya está acordado o soportado (vacaciones programadas, licencias, permisos pedidos en papel). Queda aprobado de inmediato, sin firmas, y en la auditoría con tu usuario.</p>
+    <Campo como="select" etiqueta="Persona" {...campo('cedula')}><option value="">Elige…</option>{(personas.datos || []).filter((u) => u.estado === 'activo').map((u) => <option key={u.cedula} value={u.cedula}>{u.nombre}</option>)}</Campo>
+    <Campo como="select" etiqueta="Tipo" {...campo('tipo')}>{cat.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</Campo>
+    {c && !c.rem && <Casilla {...campo('remunerado', 'check')}>Pagarlo de todas formas (permiso remunerado por decisión de la empresa)</Casilla>}
+    <div className="rejilla"><Campo etiqueta="Fecha de salida" type="date" {...campo('fechaSalida')} /><Campo etiqueta="Hora de salida" type="time" ayuda="Solo si es por horas." {...campo('horaSalida')} /></div>
+    <div className="rejilla"><Campo etiqueta="Fecha de regreso" type="date" min={f.fechaSalida} ayuda="Día en que vuelve a trabajar." {...campo('fechaRegreso')} /><Campo etiqueta="Hora de regreso" type="time" {...campo('horaRegreso')} /></div>
+    <Campo como="textarea" etiqueta="Motivo o soporte" maxLength={500} {...campo('motivo')} />
+    <div className="acciones-hoja"><Boton variante="secundario" onClick={alCerrar}>Cancelar</Boton><Boton cargando={ocupado} disabled={!f.cedula} onClick={guardar}>Registrar y aprobar</Boton></div>
+  </Hoja>;
 }
 
 /* ---------- Horas extra ---------- */
@@ -45,13 +63,16 @@ export function Extras() {
   const decidir = async (decision) => { if (await correr(() => api('adminExtraDecidir', { id: sel.id, decision, min, obs, confirmaTope: tope }), decision === 'aprobar' ? 'Horas extra aprobadas.' : 'Horas extra rechazadas.')) { setSel(null); carga.recargar(true); } };
   return <><Titulo t="Horas extra">La aplicación calcula el tiempo trabajado por encima de la jornada. Solo lo que apruebes aquí entra a la nómina.</Titulo>
     <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Filtro de horas extra" valor={filtro} alCambiar={setFiltro} opciones={[{ v: 'pendiente', t: 'Por aprobar' }, { v: 'aprobada', t: 'Aprobadas' }, { v: 'rechazada', t: 'Rechazadas' }, { v: 'todas', t: 'Todas' }]} /></div>
-    <Estado carga={carga}>{(l) => <Tabla columnas={[
+    <Estado carga={carga}>{(l) => { const lote = l.filter((x) => x.estado === 'pendiente' && !x.superaDia && !x.cerrado); return <div className="pila">
+      {filtro === 'pendiente' && lote.length > 1 && <div className="fila entre"><span className="suave chico">{lote.length} registro(s) están dentro del tope legal de 2 horas diarias. Los que lo superan se deciden uno por uno.</span>
+        <Boton variante="secundario" icono={CheckCheck} cargando={ocupado} onClick={async () => { const r = await correr(() => api('adminExtrasLote', { ids: lote.map((x) => x.id) }, { espera: 120000 })); if (r) carga.recargar(true); }}>Aprobar las {lote.length} completas</Boton></div>}
+      <Tabla columnas={[
       { k: 'fecha', t: 'Fecha', render: (x) => <span>{fechaCorta(x.fecha)}</span> }, { k: 'nombre', t: 'Persona', render: (x) => <strong>{x.nombre}</strong> },
       { k: 'minCalc', t: 'Calculadas', num: true, render: (x) => horas(x.minCalc) }, { k: 'minAprob', t: 'Aprobadas', num: true, render: (x) => x.minAprob === null ? '—' : horas(x.minAprob), valor: (x) => x.minAprob || 0 },
       { k: 'av', t: 'Avisos', orden: false, render: (x) => <span className="fila" style={{ gap: 4 }}>{x.superaDia && <Insignia tono="peligro">más de 2 h en el día</Insignia>}{x.superaSemana && <Insignia tono="peligro">más de 12 h en la semana</Insignia>}{x.obs && <span className="suave chico">{x.obs}</span>}</span> },
       { k: 'estado', t: 'Estado', render: (x) => <Insignia tono={{ pendiente: 'aviso', aprobada: 'ok', rechazada: 'peligro' }[x.estado]}>{x.estado}</Insignia> },
       { k: 'a', t: '', acciones: true, orden: false, render: (x) => x.cerrado ? <Insignia>cerrado</Insignia> : <Boton chico variante={x.estado === 'pendiente' ? 'primario' : 'secundario'} onClick={() => abrir(x)}>{x.estado === 'pendiente' ? 'Decidir' : 'Cambiar'}</Boton> }]}
-      filas={l} clave={(x) => x.id} vacio={filtro === 'pendiente' ? 'No hay horas extra por aprobar.' : 'No hay registros.'} />}</Estado>
+      filas={l} clave={(x) => x.id} vacio={filtro === 'pendiente' ? 'No hay horas extra por aprobar.' : 'No hay registros.'} /></div>; }}</Estado>
     <Hoja abierta={!!sel} alCerrar={() => setSel(null)} titulo="Aprobar horas extra" alto={0.75}>{sel && <>
       <p><strong>{sel.nombre}</strong> · {fechaCorta(sel.fecha)}. Tiempo extra calculado: <strong className="num">{horas(sel.minCalc)}</strong>.</p>
       <Campo etiqueta="Minutos que apruebas" type="number" min="1" max={sel.minCalc} value={min} onChange={(e) => setMin(+e.target.value)} ayuda={`Equivale a ${horas(min)}. Máximo ${sel.minCalc} min.`} />
@@ -83,6 +104,23 @@ export function Incapacidades() {
     <Confirmar abierta={!!borrar} titulo="Eliminar incapacidad" texto="Eliminar" variante="peligro" cargando={ocupado} alCerrar={() => setBorrar(null)} alConfirmar={eliminar}>Los días volverán a contarse como ausencia si la persona no marcó.</Confirmar></>;
 }
 
+/* ---------- Archivos planos (CSV) para software contable y pago masivo ---------- */
+export const CONCEPTOS = { SAL: 'Salario básico / días trabajados', VAC: 'Vacaciones disfrutadas', ING: 'Incapacidad enfermedad general', IN5: 'Incapacidad general desde el día 91', INL: 'Incapacidad laboral / licencia', DR: 'Descanso dominical y festivo remunerado', DNC: 'Dominical no causado por ausencia', BON: 'Bonos y pagos salariales', BNS: 'Auxilios no salariales', DES: 'Descuentos', AUS: 'Ausencias sin justificar', PNR: 'Permisos no remunerados (días)', PNH: 'Permisos no remunerados (horas)', RN: 'Recargo nocturno', DF: 'Dominical / festivo diurno', DFN: 'Dominical / festivo nocturno', HED: 'Hora extra diurna', HEN: 'Hora extra nocturna', HEDF: 'Hora extra diurna dominical / festiva', HENF: 'Hora extra nocturna dominical / festiva', AUX: 'Auxilio de transporte', SLD: 'Aporte a salud', PEN: 'Aporte a pensión', FSP: 'Fondo de solidaridad pensional' };
+function bajarCsv(filas, nombre) {
+  const celda = (v) => { let s = String(v ?? ''); if (/^[=+\-@]/.test(s) && isNaN(+s)) s = "'" + s; return /[;"\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + filas.map((f) => f.map(celda).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' })); a.download = nombre; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+export async function planoContable(lista, p) {
+  const cod = (await api('adminConfig')).codigosConcepto || {}, filas = [['Periodo desde', 'Periodo hasta', 'Cedula', 'Nombre', 'Codigo concepto', 'Concepto', 'Naturaleza', 'Cantidad', 'Valor']];
+  lista.forEach((n) => { const q = n.detalle; q.conceptos.forEach((c) => filas.push([p.desde, p.hasta, n.cedula, n.nombre, cod[c.cod] || c.cod, c.concepto, c.valor < 0 ? 'DESCUENTO' : 'DEVENGO', c.cantidad, Math.abs(c.valor)]));
+    q.deduccionesDet.forEach((c) => filas.push([p.desde, p.hasta, n.cedula, n.nombre, cod[c.cod] || c.cod, c.concepto, 'DEDUCCION', c.cantidad, c.valor])); });
+  bajarCsv(filas, `plano-conceptos-${p.desde}-a-${p.hasta}.csv`);
+}
+export async function planoPagos(lista, p) {
+  const per = {}; (await api('adminPersonal')).forEach((u) => { per[u.cedula] = u; });
+  bajarCsv([['Tipo documento', 'Cedula', 'Nombre', 'Banco', 'Tipo de cuenta', 'Numero de cuenta', 'Valor a pagar', 'Referencia']].concat(lista.filter((n) => n.neto > 0).map((n) => { const u = per[n.cedula] || {}; return ['CC', n.cedula, n.nombre, u.banco || '', u.tipoCuenta || '', u.cuenta || '', Math.round(n.neto), `NOMINA ${p.desde} A ${p.hasta}`]; })), `plano-pagos-${p.desde}-a-${p.hasta}.csv`);
+}
+
 /* ---------- Nómina ---------- */
 export function Nomina({ cfg }) {
   const [tab, setTab] = useState('previa'), [r, setR] = useState(() => periodoActual(cfg.periodoNomina)), previa = useCarga(() => api('adminNominaPrevia', r, { espera: 120000 }), [r.desde, r.hasta]), cerradas = useCarga(() => api('adminNominas'), [tab]);
@@ -91,13 +129,14 @@ export function Nomina({ cfg }) {
   const verCerrada = async (p) => { const l = await correr(() => api('adminNominaDetalle', p)); if (l) setDet({ p, l }); };
   if (desp) return <Desprendible n={desp} alVolver={() => setDesp(null)} />;
   return <><Titulo t="Nómina y desprendibles">Liquidación estimada con la normativa vigente. Al cerrar el periodo se generan los desprendibles y ese periodo queda congelado.</Titulo>
-    <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Vista de nómina" valor={tab} alCambiar={(v) => { setTab(v); setDet(null); }} opciones={[{ v: 'previa', t: 'Periodo por liquidar' }, { v: 'cerradas', t: 'Periodos cerrados' }]} /></div>
-    {tab === 'previa' ? <>
+    <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Vista de nómina" valor={tab} alCambiar={(v) => { setTab(v); setDet(null); }} opciones={[{ v: 'previa', t: 'Periodo por liquidar' }, { v: 'novedades', t: 'Bonos y descuentos' }, { v: 'cerradas', t: 'Periodos cerrados' }]} /></div>
+    {tab === 'novedades' ? <NovedadesPago r={r} setR={setR} alCambiar={() => previa.recargar(true)} /> : tab === 'previa' ? <>
       <div className="fila entre" style={{ marginBottom: 16, alignItems: 'flex-end' }}><Rango r={r} setR={setR} />
         <Boton icono={Lock} disabled={!previa.datos || previa.datos.cerrado || r.hasta >= hoyISO()} onClick={() => setCerrar(true)}>Cerrar periodo</Boton></div>
       <Estado carga={previa} lineas={8}>{(d) => <div className="pila">
         {d.cerrado && <Aviso>Este rango ya tiene una nómina cerrada. Consúltala en «Periodos cerrados».</Aviso>}
         {!d.cerrado && r.hasta >= hoyISO() && <Aviso>El periodo sigue en curso: los valores van hasta {fechaCorta(d.corte)} y podrás cerrarlo desde el {fechaCorta(sumarDias(r.hasta, 1))}.</Aviso>}
+        {d.porRevisar > 0 && <Aviso tono="peligro"><strong>{d.porRevisar} marcación(es) digitadas o tardías sin revisar.</strong> Revísalas en Marcaciones: no se puede cerrar el periodo mientras estén pendientes.</Aviso>}
         {d.extrasPendientes > 0 && <Aviso tono="aviso"><strong>{d.extrasPendientes} registro(s) de horas extra sin aprobar</strong> en este periodo: no se están pagando.</Aviso>}
         {d.permisosPendientes > 0 && <Aviso tono="aviso"><strong>{d.permisosPendientes} permiso(s) sin resolver</strong>: mientras no se aprueben, esos días cuentan como ausencia.</Aviso>}
         <div className="indicadores"><div className="indicador n-info"><span className="valor">{d.filas.length}</span><span className="rotulo">Personas</span></div><div className="indicador"><span className="valor">{pesos(d.filas.reduce((s, x) => s + x.liq.devengado, 0))}</span><span className="rotulo">Total devengado</span></div><div className="indicador n-ok"><span className="valor">{pesos(d.filas.reduce((s, x) => s + x.liq.neto, 0))}</span><span className="rotulo">Neto a pagar</span></div></div>
@@ -106,7 +145,8 @@ export function Nomina({ cfg }) {
           { k: 'au', t: 'Ausencias', num: true, valor: (x) => x.liq.ausencias, render: (x) => x.liq.ausencias || '' }, { k: 'dev', t: 'Devengado', num: true, valor: (x) => x.liq.devengado, render: (x) => pesos(x.liq.devengado) }, { k: 'neto', t: 'Neto', num: true, valor: (x) => x.liq.neto, render: (x) => <strong>{pesos(x.liq.neto)}</strong> },
           { k: 'a', t: '', acciones: true, orden: false, render: (x) => <Boton chico variante="secundario" onClick={() => setSel(x)}>Detalle</Boton> }]} filas={d.filas} clave={(x) => x.cedula} vacio="No hay personal con salario para liquidar en este periodo." />
       </div>}</Estado></> :
-      det ? <div className="pila"><div className="fila entre"><Boton variante="texto" onClick={() => setDet(null)}>← Periodos</Boton><Boton variante="secundario" icono={Download} onClick={() => aExcel({ 'Nómina': det.l.map((n) => { const q = n.detalle, v = (c) => q.conceptos.filter((k) => c.includes(k.cod)).reduce((s, k) => s + k.valor, 0); return { 'Cédula': n.cedula, Nombre: n.nombre, 'Días': q.diasNomina, 'Horas trabajadas': q.horas.trabajadas, 'Horas extra': q.horas.extras, Ausencias: q.ausencias, 'Salario básico': v(['SAL']), Recargos: v(['RN', 'DF', 'DFN']), 'Horas extra $': v(['HED', 'HEN', 'HEDF', 'HENF']), 'Auxilio transporte': v(['AUX']), Devengado: q.devengado, Deducciones: q.deducciones, Neto: q.neto }; }) }, `nomina-${det.p.desde}-a-${det.p.hasta}.xlsx`)}>Descargar Excel</Boton></div>
+      det ? <div className="pila"><div className="fila entre"><Boton variante="texto" onClick={() => setDet(null)}>← Periodos</Boton><Boton variante="secundario" icono={Download} onClick={() => aExcel({ 'Nómina': det.l.map((n) => { const q = n.detalle, v = (c) => q.conceptos.filter((k) => c.includes(k.cod)).reduce((s, k) => s + k.valor, 0); return { 'Cédula': n.cedula, Nombre: n.nombre, 'Días': q.diasNomina, 'Horas trabajadas': q.horas.trabajadas, 'Horas extra': q.horas.extras, Ausencias: q.ausencias, 'Salario básico': v(['SAL']), Recargos: v(['RN', 'DF', 'DFN']), 'Horas extra $': v(['HED', 'HEN', 'HEDF', 'HENF']), 'Auxilio transporte': v(['AUX']), Devengado: q.devengado, Deducciones: q.deducciones, Neto: q.neto }; }) }, `nomina-${det.p.desde}-a-${det.p.hasta}.xlsx`)}>Excel</Boton>
+        <Boton variante="secundario" icono={Download} onClick={() => correr(() => planoContable(det.l, det.p), 'Plano de conceptos descargado.')}>Plano contable (CSV)</Boton><Boton variante="secundario" icono={Download} onClick={() => correr(() => planoPagos(det.l, det.p), 'Plano de pagos descargado.')}>Plano de pagos (CSV)</Boton></div>
         <Tabla columnas={[{ k: 'nombre', t: 'Persona', render: (n) => <strong>{n.nombre}</strong> }, { k: 'cedula', t: 'Cédula' }, { k: 'neto', t: 'Neto pagado', num: true, render: (n) => pesos(n.neto) }, { k: 'a', t: '', acciones: true, orden: false, render: (n) => <Boton chico variante="secundario" icono={FileText} onClick={() => setDesp(n)}>Desprendible</Boton> }]} filas={det.l} clave={(n) => n.id} /></div> :
         <Estado carga={cerradas}>{(l) => <Tabla buscar={false} columnas={[{ k: 'desde', t: 'Periodo', render: (p) => <strong>{fechaCorta(p.desde)} – {fechaCorta(p.hasta)}</strong> }, { k: 'personas', t: 'Personas', num: true }, { k: 'neto', t: 'Neto total', num: true, render: (p) => pesos(p.neto) }, { k: 'cerradoEl', t: 'Cerrado', render: (p) => fechaHora(p.cerradoEl) },
           { k: 'a', t: '', acciones: true, orden: false, render: (p) => <Boton chico variante="secundario" cargando={ocupado} onClick={() => verCerrada(p)}>Ver desprendibles</Boton> }]} filas={l} clave={(p) => p.desde} vacio="Aún no se ha cerrado ningún periodo." />}</Estado>}
@@ -115,6 +155,63 @@ export function Nomina({ cfg }) {
     <Confirmar abierta={cerrar} titulo="Cerrar el periodo" texto="Cerrar y generar desprendibles" cargando={ocupado} alCerrar={() => setCerrar(false)} alConfirmar={hacerCierre}>
       <p>Del {fechaCorta(r.desde)} al {fechaCorta(r.hasta)}. Después del cierre <strong>no se podrán cambiar</strong> marcaciones, permisos, extras ni incapacidades de esas fechas.</p>
       {previa.datos && (previa.datos.extrasPendientes > 0 || previa.datos.permisosPendientes > 0) && <Aviso tono="peligro">Aún hay horas extra o permisos sin resolver en este periodo. Si cierras ahora, no se pagarán.</Aviso>}</Confirmar></>;
+}
+
+function NovedadesPago({ r, setR, alCambiar }) {
+  const carga = useCarga(() => api('adminNovedades', r), [r.desde, r.hasta]), personas = useCarga(() => api('adminPersonal'), []), [nuevo, setNuevo] = useState(false), [f, campo, setF] = useForm({}), [sel, setSel] = useState([]), [correr, ocupado] = useAccion();
+  const abrir = () => { setF({ tipo: 'salarial', fecha: hoyISO() < r.hasta ? hoyISO() : r.hasta, concepto: '', valor: '', nota: '' }); setSel([]); setNuevo(true); };
+  const guardar = async () => { if (await correr(() => api('adminNovedadGuardar', { ...f, valor: +String(f.valor).replace(/\D/g, ''), cedulas: sel }), 'Novedad registrada.')) { setNuevo(false); carga.recargar(true); alCambiar(); } };
+  const borrar = async (x) => { if (await correr(() => api('adminNovedadGuardar', { id: x.id, borrar: true }), 'Novedad eliminada.')) { carga.recargar(true); alCambiar(); } };
+  const activos = (personas.datos || []).filter((u) => u.estado === 'activo');
+  return <><div className="fila entre" style={{ marginBottom: 16, alignItems: 'flex-end' }}><Rango r={r} setR={setR} /><Boton icono={Plus} onClick={abrir}>Agregar bono o descuento</Boton></div>
+    <p className="suave chico" style={{ marginBottom: 12 }}>Pagos y descuentos que no salen de las marcaciones: bonos, comisiones, rodamiento, viáticos, préstamos, dotación. Entran a la liquidación del periodo de su fecha. Para corregir un periodo ya cerrado, registra el ajuste con fecha del periodo abierto.</p>
+    <Estado carga={carga}>{(l) => <Tabla columnas={[{ k: 'fecha', t: 'Fecha', render: (x) => fechaCorta(x.fecha) }, { k: 'nombre', t: 'Persona', render: (x) => <strong>{x.nombre}</strong> }, { k: 'concepto', t: 'Concepto' },
+      { k: 'tipo', t: 'Tipo', render: (x) => <Insignia tono={x.valor < 0 ? 'peligro' : x.salarial ? 'ok' : 'info'}>{x.valor < 0 ? 'Descuento' : x.salarial ? 'Salarial' : 'No salarial'}</Insignia>, texto: (x) => (x.valor < 0 ? 'Descuento' : x.salarial ? 'Salarial' : 'No salarial') },
+      { k: 'valor', t: 'Valor', num: true, render: (x) => pesos(Math.abs(x.valor)) }, { k: 'a', t: '', acciones: true, orden: false, render: (x) => x.cerrado ? <Insignia>cerrado</Insignia> : <Boton chico variante="texto" icono={Trash2} cargando={ocupado} onClick={() => borrar(x)}>Eliminar</Boton> }]}
+      filas={l} clave={(x) => x.id} vacio="No hay bonos ni descuentos en este rango." />}</Estado>
+    <Hoja abierta={nuevo} alCerrar={() => setNuevo(false)} titulo="Bono o descuento" alto={0.92}>
+      <Campo como="select" etiqueta="Tipo" {...campo('tipo')} opciones={[{ v: 'salarial', t: 'Pago salarial (bono, comisión): cotiza a salud y pensión' }, { v: 'no_salarial', t: 'Pago no salarial (rodamiento, viáticos, auxilio)' }, { v: 'descuento', t: 'Descuento (préstamo, dotación, libranza)' }]} />
+      <div className="rejilla"><Campo etiqueta="Concepto" placeholder="Ej.: Bono de alturas" maxLength={60} {...campo('concepto')} /><Campo etiqueta="Valor por persona ($)" inputMode="numeric" {...campo('valor')} /></div>
+      <Campo etiqueta="Fecha" type="date" ayuda="Define en qué periodo se paga o se descuenta." {...campo('fecha')} />
+      <SelectorPersonas personas={activos} sel={sel} setSel={setSel} />
+      <Campo etiqueta="Nota (opcional)" maxLength={200} {...campo('nota')} />
+      <div className="acciones-hoja"><Boton variante="secundario" onClick={() => setNuevo(false)}>Cancelar</Boton><Boton cargando={ocupado} disabled={!sel.length} onClick={guardar}>Registrar para {sel.length} persona(s)</Boton></div>
+    </Hoja></>;
+}
+function SelectorPersonas({ personas, sel, setSel }) {
+  const [q, setQ] = useState(''), vis = personas.filter((u) => !q || (u.nombre + ' ' + u.cedula).toLowerCase().includes(q.toLowerCase()));
+  return <fieldset style={{ border: 0, padding: 0, margin: 0 }} className="pila junta"><legend className="etiqueta">Personas ({sel.length} elegidas)</legend>
+    <div className="fila"><input className="entrada crece" type="search" placeholder="Buscar por nombre o cédula" aria-label="Buscar persona" value={q} onChange={(e) => setQ(e.target.value)} /><Boton chico variante="secundario" onClick={() => setSel(sel.length === vis.length ? [] : vis.map((u) => u.cedula))}>{sel.length === vis.length && vis.length ? 'Ninguna' : 'Todas'}</Boton></div>
+    <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--c-borde)', borderRadius: 'var(--r-2)', padding: 8 }} className="pila junta">{vis.map((u) => <label key={u.cedula} className="fila" style={{ flexWrap: 'nowrap', minHeight: 36 }}><input type="checkbox" style={{ width: 20, height: 20, accentColor: 'var(--c-primario)' }} checked={sel.includes(u.cedula)} onChange={(e) => setSel(e.target.checked ? [...sel, u.cedula] : sel.filter((c) => c !== u.cedula))} /><span>{u.nombre}</span></label>)}{vis.length === 0 && <span className="suave chico">Sin coincidencias.</span>}</div></fieldset>;
+}
+
+/* ---------- Turnos rotativos ---------- */
+const DIAS_C = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+export function Turnos() {
+  const carga = useCarga(() => api('adminTurnos'), []), personas = useCarga(() => api('adminPersonal'), []), [turno, setTurno] = useState(null), [prog, setProg] = useState(null), [sel, setSel] = useState([]), [correr, ocupado] = useAccion();
+  const guardarTurno = async () => { if (await correr(() => api('adminTurnoGuardar', turno), 'Turno guardado.')) { setTurno(null); carga.recargar(true); } };
+  const programar = async () => { if (await correr(() => api('adminProgramar', { ...prog, cedulas: sel }), 'Programación guardada.')) { setProg(null); carga.recargar(true); } };
+  const quitar = async (p) => { if (await correr(() => api('adminProgramacionBorrar', { id: p.id }), 'Programación quitada.')) carga.recargar(true); };
+  const activos = (personas.datos || []).filter((u) => u.estado === 'activo');
+  return <><Titulo t="Turnos" accion={<><Boton variante="secundario" icono={Plus} onClick={() => setTurno({ nombre: '', e: '06:00', s: '14:00', ai: '', af: '', dias: [], activo: true })}>Crear turno</Boton><Boton icono={CalendarCheck} onClick={() => { setSel([]); setProg({ turnoId: '', desde: hoyISO(), hasta: sumarDias(hoyISO(), 6) }); }}>Programar personas</Boton></>}>Para quien no sigue el horario fijo de su obra: turnos de noche, rotaciones semanales y descansos. Mientras una persona tenga un turno programado, ese turno reemplaza el horario del centro.</Titulo>
+    <Estado carga={carga}>{(d) => <div className="pila amplia">
+      {d.turnos.length === 0 ? <Vacio icono={Timer} titulo="Aún no hay turnos">Crea los turnos de tu operación (por ejemplo: Mañana 06–14, Tarde 14–22, Noche 22–06) y luego prográmalos por fechas.</Vacio> :
+        <div className="rejilla">{d.turnos.map((t) => <Tarjeta key={t.id}><div className="fila entre" style={{ alignItems: 'flex-start' }}><div><h3>{t.nombre}</h3><p className="num">{t.e}–{t.s}{t.ai ? ` · almuerzo ${t.ai}–${t.af}` : ''}</p><p className="suave chico">{horas(t.min)} por día · {t.dias.length ? t.dias.map((x) => DIAS_C[x]).join(', ') : 'todos los días del rango'}</p></div><Boton chico variante="secundario" icono={Pencil} onClick={() => setTurno(t)}>Editar</Boton></div>{t.min > 540 && <Aviso tono="aviso">Pasa de 9 horas diarias: el exceso se liquida como hora extra.</Aviso>}</Tarjeta>)}</div>}
+      <Tarjeta titulo="Programación vigente y reciente"><Tabla columnas={[{ k: 'nombre', t: 'Persona', render: (p) => <strong>{p.nombre}</strong> }, { k: 'turno', t: 'Turno', render: (p) => p.turnoId === 'descanso' ? <Insignia>Descanso</Insignia> : p.turno }, { k: 'desde', t: 'Desde', render: (p) => fechaCorta(p.desde) }, { k: 'hasta', t: 'Hasta', render: (p) => fechaCorta(p.hasta) },
+        { k: 'a', t: '', acciones: true, orden: false, render: (p) => p.cerrado ? <Insignia>cerrado</Insignia> : <Boton chico variante="texto" icono={Trash2} cargando={ocupado} onClick={() => quitar(p)}>Quitar</Boton> }]} filas={d.programacion} clave={(p) => p.id} vacio="Nadie tiene turnos programados: todos siguen el horario de su centro de trabajo." /></Tarjeta>
+      <Hoja abierta={!!prog} alCerrar={() => setProg(null)} titulo="Programar personas" alto={0.92}>{prog && <>
+        <Campo como="select" etiqueta="Turno" value={prog.turnoId} onChange={(e) => setProg({ ...prog, turnoId: e.target.value })}><option value="">Elige…</option>{d.turnos.filter((t) => t.activo).map((t) => <option key={t.id} value={t.id}>{t.nombre} ({t.e}–{t.s})</option>)}<option value="descanso">Descanso (no se espera que marque)</option></Campo>
+        <div className="rejilla"><Campo etiqueta="Desde" type="date" value={prog.desde} onChange={(e) => setProg({ ...prog, desde: e.target.value })} /><Campo etiqueta="Hasta (incluido)" type="date" min={prog.desde} value={prog.hasta} onChange={(e) => setProg({ ...prog, hasta: e.target.value })} /></div>
+        <SelectorPersonas personas={activos} sel={sel} setSel={setSel} />
+        <p className="suave chico">Si una persona ya tenía otro turno en esas fechas, vale la programación más reciente.</p>
+        <div className="acciones-hoja"><Boton variante="secundario" onClick={() => setProg(null)}>Cancelar</Boton><Boton cargando={ocupado} disabled={!sel.length || !prog.turnoId} onClick={programar}>Programar a {sel.length} persona(s)</Boton></div></>}</Hoja>
+    </div>}</Estado>
+    <Hoja abierta={!!turno} alCerrar={() => setTurno(null)} titulo={turno?.id ? 'Editar turno' : 'Crear turno'} alto={0.8}>{turno && <>
+      <Campo etiqueta="Nombre" placeholder="Ej.: Noche 22–06" value={turno.nombre} onChange={(e) => setTurno({ ...turno, nombre: e.target.value })} />
+      <div className="rejilla"><Campo etiqueta="Entrada" type="time" value={turno.e} onChange={(e) => setTurno({ ...turno, e: e.target.value })} /><Campo etiqueta="Salida" type="time" ayuda="Si es menor que la entrada, termina al día siguiente." value={turno.s} onChange={(e) => setTurno({ ...turno, s: e.target.value })} /></div>
+      <div className="rejilla"><Campo etiqueta="Inicio de la pausa (opcional)" type="time" value={turno.ai} onChange={(e) => setTurno({ ...turno, ai: e.target.value })} /><Campo etiqueta="Fin de la pausa" type="time" value={turno.af} onChange={(e) => setTurno({ ...turno, af: e.target.value })} /></div>
+      <fieldset style={{ border: 0, padding: 0, margin: 0 }}><legend className="etiqueta">Días en que aplica (ninguno marcado = todos los días del rango programado)</legend><div className="fila" style={{ marginTop: 8 }}>{[1, 2, 3, 4, 5, 6, 0].map((x) => <label key={x} className="fila" style={{ gap: 4 }}><input type="checkbox" style={{ width: 20, height: 20, accentColor: 'var(--c-primario)' }} checked={turno.dias.includes(x)} onChange={(e) => setTurno({ ...turno, dias: e.target.checked ? [...turno.dias, x] : turno.dias.filter((y) => y !== x) })} />{DIAS_C[x]}</label>)}</div></fieldset>
+      <div className="acciones-hoja"><Boton variante="secundario" onClick={() => setTurno(null)}>Cancelar</Boton><Boton cargando={ocupado} onClick={guardarTurno}>Guardar turno</Boton></div></>}</Hoja></>;
 }
 
 /* ---------- Resumen por obra + exportación general ---------- */
@@ -131,7 +228,7 @@ export function Obras({ cfg }) {
 /* ---------- Alertas ---------- */
 export function Alertas() {
   const carga = useCarga(() => api('adminConfig'), []), bit = useCarga(() => api('adminBitacoras', { cual: 'alertas' }), []), [tab, setTab] = useState('config'), [f, setF] = useState(null), [correr, ocupado] = useAccion();
-  useEffect(() => { if (carga.datos && !f) { const c = carga.datos; setF({ correoAlertas: c.correoAlertas, minutosAusencia: c.minutosAusencia, recordatorioMin: c.recordatorioMin, recordatorioCorreo: c.recordatorioCorreo, alertas: Object.fromEntries(Object.keys(c.tiposAlerta).map((k) => [k, { activo: c.alertas[k]?.activo !== false, correos: c.alertas[k]?.correos || '' }])) }); } }, [carga.datos]); // eslint-disable-line
+  useEffect(() => { if (carga.datos && !f) { const c = carga.datos; setF({ correoAlertas: c.correoAlertas, minutosAusencia: c.minutosAusencia, fatigaHorasMax: c.fatigaHorasMax, fatigaAvisoMin: c.fatigaAvisoMin, recordatorioMin: c.recordatorioMin, recordatorioCorreo: c.recordatorioCorreo, alertas: Object.fromEntries(Object.keys(c.tiposAlerta).map((k) => [k, { activo: c.alertas[k]?.activo !== false, correos: c.alertas[k]?.correos || '' }])) }); } }, [carga.datos]); // eslint-disable-line
   const pon = (k, campo, v) => setF((x) => ({ ...x, alertas: { ...x.alertas, [k]: { ...x.alertas[k], [campo]: v } } }));
   return <><Titulo t="Alertas">Qué situaciones avisan por correo y a quién. Cada alerta puede tener sus propios destinatarios.</Titulo>
     <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Vista de alertas" valor={tab} alCambiar={setTab} opciones={[{ v: 'config', t: 'Configurar' }, { v: 'historial', t: 'Historial' }]} /></div>
@@ -140,6 +237,8 @@ export function Alertas() {
         <Campo etiqueta="Correo general de alertas" type="text" placeholder="rrhh@empresa.co, jefe@empresa.co" ayuda="Varios correos separados por coma. Lo usa toda alerta que no tenga destinatarios propios." value={f.correoAlertas} onChange={(e) => setF({ ...f, correoAlertas: e.target.value })} />
         <div className="rejilla"><Campo etiqueta="Avisar ausencia a los (min)" type="number" min="5" ayuda="Minutos después de la hora de entrada sin marcar." value={f.minutosAusencia} onChange={(e) => setF({ ...f, minutosAusencia: e.target.value })} />
           <Campo etiqueta="Recordatorio de marcación (min)" type="number" min="0" ayuda="Antes de entrar y después de la hora de salida; igual en el almuerzo." value={f.recordatorioMin} onChange={(e) => setF({ ...f, recordatorioMin: e.target.value })} /></div>
+        <div className="rejilla"><Campo etiqueta="Control de fatiga: máximo de horas continuas" type="number" min="0" step="0.5" ayuda="Jornada abierta, sin contar el almuerzo marcado. 0 = sin control." value={f.fatigaHorasMax} onChange={(e) => setF({ ...f, fatigaHorasMax: e.target.value })} />
+          <Campo etiqueta="Avisar antes del máximo (min)" type="number" min="0" ayuda="La alerta sale estos minutos antes de llegar al límite." value={f.fatigaAvisoMin} onChange={(e) => setF({ ...f, fatigaAvisoMin: e.target.value })} /></div>
         <Casilla checked={f.recordatorioCorreo} onChange={(e) => setF({ ...f, recordatorioCorreo: e.target.checked })}>Enviar además el recordatorio por correo al trabajador que no ha marcado (llega aunque tenga la aplicación cerrada)</Casilla>
       </div></Tarjeta>
       <Tarjeta titulo="Tipos de alerta"><div className="pila junta">{Object.keys(c.tiposAlerta).map((k) => <div key={k} className="fila" style={{ alignItems: 'flex-end', borderTop: '1px solid var(--c-borde)', paddingTop: 12 }}>
@@ -178,11 +277,12 @@ export function Config({ centros, recargarYo }) {
         <div className="rejilla">{num('fotoProbabilidad', 'Foto al azar (% de marcaciones)', '0 = nunca, 100 = siempre.', { max: 100 })}{num('radioDefecto', 'Radio por defecto de un centro (m)')}</div>
         <Casilla checked={f.geocercaEstricta} onChange={(e) => pon('geocercaEstricta', e.target.checked)}>Impedir la marcación fuera del radio del centro de trabajo. Si está apagado, se deja marcar pero se genera una alerta.</Casilla>
         <div className="rejilla">{num('toleranciaMin', 'Tolerancia de llegada por defecto (min)')}{num('diasAtrasManual', 'Días hacia atrás para “Se me olvidó marcar”')}</div>
+        <div className="rejilla">{num('factorPrestacional', 'Factor prestacional (%)', 'Se suma al costo en Informes: prestaciones, aportes y parafiscales del empleador. Suele estar entre 50 y 55 %.')}</div>
         <div className="rejilla">{num('horasLimitePermiso', 'Límite para responder un permiso (horas)', 'Pasado este tiempo sin todas las firmas, vence y te llega una alerta.')}{num('sesionDias', 'Duración de la sesión (días)', 'El usuario permanece ingresado en su celular este tiempo.')}</div>
         <Casilla checked={f.aprobacionFinalAdmin} onChange={(e) => pon('aprobacionFinalAdmin', e.target.checked)}>Después de las firmas de los jefes, exigir la aprobación final del administrador (recomendado)</Casilla>
         <Casilla checked={f.autoRegistro} onChange={(e) => pon('autoRegistro', e.target.checked)}>Permitir que personas no cargadas se registren con el código de la empresa (quedan pendientes de tu aprobación)</Casilla>
         {f.autoRegistro && <Campo etiqueta="Código de la empresa" ayuda="Compártelo solo con tu personal. Cámbialo si se filtra." value={f.codigoEmpresa} onChange={(e) => pon('codigoEmpresa', e.target.value)} />}
-        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar(Object.fromEntries(['fotoProbabilidad', 'radioDefecto', 'geocercaEstricta', 'toleranciaMin', 'diasAtrasManual', 'horasLimitePermiso', 'sesionDias', 'aprobacionFinalAdmin', 'autoRegistro', 'codigoEmpresa'].map((k) => [k, f[k]])))}>Guardar</Boton></div></div></Tarjeta>}
+        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar(Object.fromEntries(['factorPrestacional', 'fotoProbabilidad', 'radioDefecto', 'geocercaEstricta', 'toleranciaMin', 'diasAtrasManual', 'horasLimitePermiso', 'sesionDias', 'aprobacionFinalAdmin', 'autoRegistro', 'codigoEmpresa'].map((k) => [k, f[k]])))}>Guardar</Boton></div></div></Tarjeta>}
 
       {tab === 'jefes' && <Tarjeta titulo="Jefes que firman los permisos" accion={<Boton chico icono={Plus} onClick={() => setJefe({ nombre: '', cargo: '', email: '', whatsapp: '', centros: [], activo: true, pin: '' })}>Agregar jefe</Boton>}>
         <p className="suave chico" style={{ marginBottom: 12 }}>Cada permiso debe ser firmado por todos los jefes activos del centro de trabajo del solicitante. Firman desde un enlace que reciben por WhatsApp o correo, con su clave personal.</p>
@@ -195,11 +295,18 @@ export function Config({ centros, recargarYo }) {
         <div className="rejilla">{leg('nocheInicio', 'Inicio de jornada nocturna', '', 'time')}{leg('nocheFin', 'Fin de jornada nocturna', '', 'time')}</div>
         <div className="rejilla">{leg('recargoNocturno', 'Recargo nocturno (%)')}{leg('recargoDominical', 'Recargo dominical y festivo (%)', 'Vacío = escalonado de ley: 90 % hasta jun-2027, luego 100 %.')}</div>
         <div className="rejilla">{leg('extraDiurna', 'Hora extra diurna (%)')}{leg('extraNocturna', 'Hora extra nocturna (%)')}</div>
+        <div className="rejilla">{leg('maxOrdinariaDiaH', 'Máximo de horas ordinarias por día', 'Con horario de más horas, el exceso es extra.')}{leg('jornadaDiaSinHorarioH', 'Jornada diaria si la persona no tiene horario (h)')}</div>
+        <Casilla checked={!!L.descontarDominical} onChange={(e) => setL({ ...L, descontarDominical: e.target.checked })}>Descontar el dominical de la semana cuando hay una ausencia sin justificar (CST art. 173). Es una facultad del empleador: actívalo solo si tu reglamento lo aplica.</Casilla>
         <div className="rejilla">{leg('maxExtraDiaH', 'Máximo de horas extra por día')}{leg('maxExtraSemanaH', 'Máximo de horas extra por semana')}</div>
         <div className="rejilla">{leg('smmlv', 'Salario mínimo mensual ($)')}{leg('auxTransporte', 'Auxilio de transporte mensual ($)')}</div>
         <div className="rejilla">{leg('pctSalud', 'Aporte del trabajador a salud (%)')}{leg('pctPension', 'Aporte del trabajador a pensión (%)')}</div>
         {leg('festivosExtra', 'Días de descanso adicionales de la empresa', 'Fechas AAAA-MM-DD separadas por coma. Los festivos nacionales se calculan solos cada año.', 'text')}
         <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={guardarLegal}>Guardar parámetros</Boton></div></div></Tarjeta>}
+
+      {tab === 'legal' && <Tarjeta titulo="Códigos de concepto para el archivo plano"><div className="pila">
+        <p className="suave chico">Escribe el código que usa tu software contable para cada concepto. El archivo plano (CSV) de cada nómina cerrada sale con estos códigos; si dejas uno vacío, sale la sigla interna.</p>
+        <div className="rejilla">{Object.keys(CONCEPTOS).map((k) => <Campo key={k} etiqueta={`${CONCEPTOS[k]} (${k})`} maxLength={20} value={(f.codigosConcepto || {})[k] || ''} onChange={(e) => pon('codigosConcepto', { ...(f.codigosConcepto || {}), [k]: e.target.value })} />)}</div>
+        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar({ codigosConcepto: f.codigosConcepto || {} }, 'Códigos guardados.')}>Guardar códigos</Boton></div></div></Tarjeta>}
 
       {tab === 'datos' && <Tarjeta titulo="Conservación de datos y copias de seguridad"><div className="pila">
         <div className="rejilla">{num('retencionFotosDias', 'Conservar las fotos (días)', 'Luego se eliminan solas.')}{num('retencionGpsDias', 'Conservar las coordenadas GPS (días)', 'Luego se borran; la marcación se conserva.')}</div>
@@ -210,7 +317,7 @@ export function Config({ centros, recargarYo }) {
     <Hoja abierta={!!jefe} alCerrar={() => setJefe(null)} titulo={jefe?.id ? 'Editar jefe' : 'Agregar jefe'}>{jefe && <>
       <div className="rejilla"><Campo etiqueta="Nombre" required value={jefe.nombre} onChange={(e) => setJefe({ ...jefe, nombre: e.target.value })} /><Campo etiqueta="Cargo" value={jefe.cargo} onChange={(e) => setJefe({ ...jefe, cargo: e.target.value })} /></div>
       <div className="rejilla"><Campo etiqueta="WhatsApp" inputMode="numeric" ayuda="Celular de 10 dígitos." value={jefe.whatsapp} onChange={(e) => setJefe({ ...jefe, whatsapp: e.target.value })} /><Campo etiqueta="Correo" type="email" ayuda="Recibe el enlace de firma y la constancia." value={jefe.email} onChange={(e) => setJefe({ ...jefe, email: e.target.value })} /></div>
-      <Campo etiqueta={jefe.tienePin ? 'Nueva clave de firma (deja vacío para no cambiarla)' : 'Clave de firma'} type="password" inputMode="numeric" autoComplete="new-password" ayuda="4 a 8 números. Entrégasela solo al jefe: con ella firma los permisos." value={jefe.pin} onChange={(e) => setJefe({ ...jefe, pin: e.target.value.replace(/\D/g, '') })} />
+      <Campo etiqueta={jefe.tienePin ? 'Nueva clave de firma (deja vacío para no cambiarla)' : 'Clave de firma'} type="password" inputMode="numeric" autoComplete="new-password" ayuda="6 a 8 números. Entrégasela solo al jefe: con ella firma los permisos. Tras cinco errores la firma se bloquea 6 horas." value={jefe.pin} onChange={(e) => setJefe({ ...jefe, pin: e.target.value.replace(/\D/g, '') })} />
       <fieldset style={{ border: 0, padding: 0, margin: 0 }} className="pila junta"><legend className="etiqueta">Centros donde firma (ninguno marcado = todos)</legend>{centros.map((c) => <Casilla key={c.id} checked={jefe.centros.includes(c.id)} onChange={(e) => setJefe({ ...jefe, centros: e.target.checked ? [...jefe.centros, c.id] : jefe.centros.filter((x) => x !== c.id) })}>{c.nombre}</Casilla>)}</fieldset>
       <Casilla checked={jefe.activo} onChange={(e) => setJefe({ ...jefe, activo: e.target.checked })}>Activo</Casilla>
       <div className="acciones-hoja"><Boton variante="secundario" onClick={() => setJefe(null)}>Cancelar</Boton><Boton cargando={ocupado} onClick={async () => { if (await correr(() => api('adminJefeGuardar', jefe), 'Jefe guardado.')) { setJefe(null); carga.recargar(true); } }}>Guardar jefe</Boton></div></>}</Hoja></>;

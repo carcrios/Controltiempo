@@ -116,6 +116,39 @@ t('pago por día: paga días trabajados, sin ausencias', () => {
   const p = quincena({ usuario: { salario: 80000, tipoPago: 'dia' } }); p.dias = p.dias.slice(0, 5);
   const r = M.liquidarPeriodo(p); eq(r.conceptos.find(x => x.cod === 'SAL').valor, 400000); eq(r.ausencias, 0);
 });
+t('pago por día: gana el descanso dominical y festivo, y cobra incapacidad y vacaciones', () => {
+  const p = quincena({ usuario: { salario: 58364, tipoPago: 'dia' } }); const r = M.liquidarPeriodo(p);
+  eq(r.conceptos.find(x => x.cod === 'SAL').cantidad, 9); eq(r.conceptos.find(x => x.cod === 'DR').cantidad, 4); // descansos: domingos 1, 8 y 15 y festivo del 2
+  const q = quincena({ usuario: { salario: 58364, tipoPago: 'dia' }, incapacidades: [{ desde: '2026-11-03', hasta: '2026-11-06', tipo: 'general' }] }); q.dias = q.dias.filter(d => d.fecha > '2026-11-06');
+  assert(M.liquidarPeriodo(q).conceptos.find(x => x.cod === 'ING').valor > 0);
+});
+t('fecha de retiro: no se liquida después de salir', () => {
+  const p = quincena({ retiro: '2026-11-05' }); p.dias = p.dias.filter(d => d.fecha <= '2026-11-05'); const r = M.liquidarPeriodo(p); eq(r.diasNomina, 5); eq(r.ausencias, 0);
+});
+t('sábado no programado: todo es extra y requiere aprobación', () => {
+  const dias = [{ fecha: '2026-11-07', entrada: '07:00', salida: '15:00', horario: null, libre: true }];
+  eq(M.liquidarDias(dias, null, null)['2026-11-07'].extraCalculadaMin, 480); eq(M.liquidarDias(dias, null, {})['2026-11-07'].extraSinAprobarMin, 480);
+});
+t('horario de más de 9 h diarias: el exceso es extra', () => eq(M.liquidarDia({ fecha: '2026-11-10', entrada: '06:00', salida: '17:00' }, { e: '06:00', s: '17:00', ai: '12:00', af: '12:30' }).extraCalculadaMin, 90));
+t('domingo habitual (en el horario) paga solo el recargo; ocasional paga hora + recargo', () => {
+  const HD = { e: '07:00', s: '15:00' }, base = { usuario: U, desde: '2026-11-01', hasta: '2026-11-15', corte: '2026-11-08', horario: { 0: HD } };
+  const hab = M.liquidarPeriodo(Object.assign({ dias: [{ fecha: '2026-11-08', entrada: '07:00', salida: '15:00', horario: HD }] }, base)).conceptos.find(x => x.cod === 'DF').valor;
+  const oca = M.liquidarPeriodo(Object.assign({ dias: [{ fecha: '2026-11-08', entrada: '07:00', salida: '15:00', horario: null }] }, base)).conceptos.find(x => x.cod === 'DF').valor;
+  eq(hab, Math.round(8 * 1750905 / 210 * 0.9)); eq(oca, Math.round(8 * 1750905 / 210 * 1.9));
+});
+t('solidaridad por IBC con tramos y tope de 25 SMMLV', () => {
+  const r17 = M.liquidarPeriodo(quincena({ usuario: { salario: 17.5 * 1750905 } })); eq(r17.deduccionesDet.find(x => x.cod === 'FSP').cantidad, '1.4 %');
+  const r50 = M.liquidarPeriodo(quincena({ usuario: { salario: 50000000 } })); eq(r50.deduccionesDet.find(x => x.cod === 'SLD').valor, Math.round(1750905 * 25 / 2 * 0.04));
+});
+t('ausencia: dominical no causado solo si la empresa lo activa; permiso por horas sin asistir es ausencia', () => {
+  const p = quincena(); p.dias = p.dias.filter(d => d.fecha !== '2026-11-10');
+  assert(!M.liquidarPeriodo(p).conceptos.find(x => x.cod === 'DNC')); eq(M.liquidarPeriodo(p, { descontarDominical: true }).conceptos.find(x => x.cod === 'DNC').valor, -58364);
+  const q = quincena({ permisos: [{ desde: '2026-11-10', hasta: '2026-11-10', remunerado: true, horas: 2, tipo: 'cita_medica' }] }); q.dias = q.dias.filter(d => d.fecha !== '2026-11-10'); eq(M.liquidarPeriodo(q).ausencias, 1);
+});
+t('licencia remunerada de día completo no causa auxilio de transporte', () => {
+  const p = quincena({ permisos: [{ desde: '2026-11-09', hasta: '2026-11-13', remunerado: true, tipo: 'luto' }] }); p.dias = p.dias.filter(d => d.fecha < '2026-11-09' || d.fecha > '2026-11-13');
+  eq(M.liquidarPeriodo(p).conceptos.find(x => x.cod === 'AUX').cantidad, 10);
+});
 t('vacaciones: 15 días hábiles por año y conteo de hábiles', () => { eq(M.vacacionesCausadas('2025-11-15', '2026-11-15'), 15); eq(M.diasHabiles('2026-11-09', '2026-11-20', null, false), 9); });
 t('catálogo de permisos con norma', () => assert(M.PERMISOS.every(p => p.norma && p.cat)));
 console.log(`Motor: ${ok} pruebas correctas, ${mal} con error`); process.exit(mal ? 1 : 0);

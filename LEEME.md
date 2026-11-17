@@ -9,71 +9,70 @@ Una hoja de cálculo = una empresa. Nada de la empresa está escrito en el códi
 horarios, jefes, alertas y parámetros legales se configuran desde el panel del administrador.
 
 ```
+instalacion/   ControlJornada.gs: archivo único para la plantilla de Google Sheets
+herramientas/  empaquetar.js: genera el archivo único
 apps-script/   Backend (se pega en el editor de Apps Script de la hoja)
 docs/          Sitio ya compilado: es lo que publica GitHub Pages
 web/           Código fuente de la página (React + InteraUI). Solo si vas a modificarla
 tests/         Pruebas automáticas y servidor de demostración local
 ```
 
-## Instalación (unos 20 minutos)
+## Informes
+Panel → **Informes**: elige periodo (hasta 90 días), cómo agrupar (persona, obra, cargo, día, semana, mes,
+día de la semana o total), filtros y columnas. Todo se calcula con el mismo motor de la nómina, así que los
+totales cuadran con ella. Hay seis informes listos y puedes guardar los tuyos. El costo incluye el factor
+prestacional si lo configuras. Descarga a Excel o CSV con la fila de totales y los filtros usados.
 
-### 1. Hoja de cálculo y backend
-1. Crea una hoja de Google Sheets vacía en la cuenta de Google **de la empresa** (no una personal).
-2. Extensiones → Apps Script. Borra el contenido de `Código.gs`.
-3. Crea cuatro archivos de secuencia de comandos y pega en cada uno el contenido de
-   `apps-script/Motor.gs`, `Base.gs`, `Servicios.gs` y `Tareas.gs`.
-4. Configuración del proyecto (engranaje) → activa «Mostrar el archivo de manifiesto appsscript.json»
-   y reemplázalo por el de `apps-script/appsscript.json`.
-5. Vuelve a la hoja, recárgala y usa el menú **Control de jornada → 1. Instalar o reparar**.
-   Acepta los permisos. Al terminar verás el **código del primer administrador**: anótalo.
-6. En Apps Script: Implementar → Nueva implementación → tipo **Aplicación web** →
-   Ejecutar como: **Yo** · Quién tiene acceso: **Cualquier persona** → Implementar.
-   Copia la URL que termina en `/exec`.
+## Cómo se instala (modelo de venta)
 
-### 2. Página en GitHub
-1. Crea un repositorio y sube todo el contenido de esta carpeta.
-2. Edita `docs/config.js` y pega la URL `/exec` en `API_URL`.
-3. Settings → Pages → Source: **Deploy from a branch** → rama `main`, carpeta **/docs**.
-4. Abre la dirección que te da GitHub (`https://usuario.github.io/repositorio/`).
+Tú publicas **una sola página** para todos tus clientes. Cada cliente tiene **su propia hoja de Google**
+en su cuenta: sus datos nunca pasan por ti. El cliente no toca GitHub, código ni `config.js`.
 
-> El repositorio puede ser público: no contiene datos de personas ni claves. Nunca subas a él
-> listados de personal.
+### Una sola vez (tú, como proveedor)
+1. **Página:** sube este repositorio a GitHub → Settings → Pages → rama `main`, carpeta `/docs`.
+   Deja `docs/config.js` con `API_URL` vacío (así cada empresa entra con su propio enlace).
+2. **Plantilla:** crea una hoja de Google vacía → Extensiones → Apps Script → borra `Código.gs` y pega
+   `instalacion/ControlJornada.gs`. En la configuración del proyecto activa «Mostrar appsscript.json» y
+   pega `instalacion/appsscript.json`. En la línea `var APP_PREDETERMINADA = '';` pon la dirección de tu
+   página (`https://usuario.github.io/repositorio/`). Guarda. **No instales ni implementes la plantilla.**
+3. Comparte la plantilla como «Cualquier persona con el enlace: lector» y arma el enlace de copia:
+   cambia el final `/edit…` por `/copy`. Ese enlace es el que entregas a cada cliente.
+   (`node herramientas/empaquetar.js https://usuario.github.io/repositorio/` regenera el archivo único
+   con la dirección ya escrita.)
 
-### 3. Primer ingreso
-1. En la página escribe tu cédula → «Crea tu cuenta» → en *Código de activación* pon el código
-   del primer administrador.
-2. En **Configuración** completa los datos de la empresa, el correo de alertas y los jefes que
-   firman (cada uno con su clave de firma).
-3. En **Centros de trabajo** crea cada obra con su horario y ubicación.
-4. En **Personal** agrega las personas (o importa un Excel con columnas Cédula, Nombre, Cargo,
-   Salario, Centro, Ingreso, Correo, Celular). Cada una recibe un código de un solo uso.
-5. Cada trabajador entra con su cédula, pone el código, crea su contraseña y autoriza el
-   tratamiento de datos. En su celular: menú del navegador → «Instalar aplicación».
+### Cada cliente (unos 10 minutos) → ver `GUIA-CLIENTE.md`
+1. Abre tu enlace `/copy` con la cuenta de Google de la empresa → «Hacer una copia».
+2. En su copia: menú **Control de jornada → 1. Instalar** → autoriza. Anota el código de administrador.
+3. Extensiones → Apps Script → **Implementar → Nueva implementación → Aplicación web**
+   (Ejecutar como: Yo · Acceso: Cualquier persona).
+4. Menú **Control de jornada → 2. Ver el enlace de mi empresa** → lo abre, entra con su cédula y el código,
+   y lo comparte con su personal. El panel le muestra los «Primeros pasos».
 
-## Cómo se actualiza
-- **Backend:** pega los archivos nuevos en Apps Script → Implementar → Gestionar implementaciones →
-  lápiz → Versión: *Nueva versión*. La URL no cambia.
-- **Página:** `cd web && npm install && npm run build` y sube la carpeta `docs/`
-  (vuelve a poner tu `API_URL` en `docs/config.js`).
+La copia descarta automáticamente el secreto y las carpetas de la plantilla.
+
+### Actualizar a un cliente
+Pega el `ControlJornada.gs` nuevo en su Apps Script → Implementar → Gestionar implementaciones → lápiz →
+Versión: Nueva versión (la dirección no cambia) → menú «1. Instalar» para poner al día las hojas.
+La página se actualiza sola para todos al subir `docs/` nuevo: los celulares muestran «Actualizar».
 
 ## Pruebas de funcionamiento
 ```
-node tests/motor.test.js     # 33 pruebas del cálculo de jornada y nómina
-node tests/api.test.js       # 50 pruebas de extremo a extremo, incluidos intentos de ataque
+node tests/motor.test.js     # 41 pruebas del cálculo de jornada y nómina
+node tests/api.test.js       # 70 pruebas de extremo a extremo, incluidos intentos de ataque
 ```
 Corren solas en cada cambio (GitHub Actions). Dentro de la aplicación, **Sistema y respaldo**
 ejecuta 8 comprobaciones sobre la instalación real.
 
 Demostración local con datos de ejemplo:
 `cd web && npm install && npm run build && cd .. && node tests/servidor-local.js` → http://localhost:8787
-(administrador 79000001 / demo2026 · trabajador 1020333444 / demo2026 · clave de firma 4821).
+(administrador 79000001 / demo2026 · trabajador 1020333444 / demo2026 · clave de firma 482173).
+Con `ENLACE=1 node tests/servidor-local.js` se prueba la conexión por enlace: abre http://localhost:8787/#/c/AKfycbDEMOdemoDEMOdemo1234567.
 
 ## Copias de seguridad y restauración
 - Automática cada 7 días (configurable) en la carpeta «Control de jornada - Copias de seguridad»
   del Drive de la empresa; conserva las últimas 8. También manual desde el panel.
-- **Restaurar:** abre la copia deseada → Extensiones → Apps Script (el código viaja con la copia) →
-  ejecuta `instalar` → crea una implementación nueva → actualiza `API_URL` en `docs/config.js`.
-  Los usuarios deben ingresar de nuevo. Prueba este procedimiento una vez antes de necesitarlo.
+- **Restaurar:** abre la copia deseada → menú «1. Instalar» → Implementar → Nueva implementación →
+  menú «2. Ver el enlace de mi empresa» y reenvía ese enlace. Los usuarios deben ingresar de nuevo. Prueba este procedimiento una vez antes de necesitarlo.
 
 ## Seguridad y datos
 - Contraseñas y claves de firma: hash con sal; nunca en claro. Sesión de 90 días por dispositivo.

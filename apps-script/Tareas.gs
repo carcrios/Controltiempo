@@ -3,7 +3,9 @@
  */
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Control de jornada')
-    .addItem('1. Instalar o reparar', 'instalar')
+    .addItem('1. Instalar', 'instalar')
+    .addItem('2. Ver el enlace de mi empresa', 'verEnlace')
+    .addSeparator()
     .addItem('Ver código del primer administrador', 'verCodigoAdmin')
     .addItem('Hacer copia de seguridad ahora', 'respaldarAhora')
     .addItem('Probar funcionamiento', 'probarFuncionamiento')
@@ -13,22 +15,40 @@ function aviso_(t) { try { SpreadsheetApp.getUi().alert(t); } catch (e) { Logger
 
 /** Ejecutar UNA vez desde el menú (o desde el editor). Se puede repetir sin perder datos. */
 function instalar() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet(); prop_('SS_ID', ss.getId());
-  Object.keys(HOJAS).forEach(function (h) { hoja_(h); });
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  // Una copia de la plantilla trae las propiedades de la original: se descartan para no compartir secreto ni carpetas.
+  if (prop_('SS_ID') && prop_('SS_ID') !== ss.getId()) PropertiesService.getScriptProperties().deleteAllProperties();
+  prop_('SS_ID', ss.getId());
+  Object.keys(HOJAS).forEach(function (n) { var h = hoja_(n); h.getRange(1, 1, 1, HOJAS[n].length).setValues([HOJAS[n]]).setFontWeight('bold'); // encabezados al día tras una actualización
+    h.getRange(1, 1, h.getMaxRows(), HOJAS[n].length).setNumberFormat('@'); });
+  ['Sesiones', 'Auditoria', 'Errores'].forEach(function (n) { var h = ss.getSheetByName(n); if (h && h.hideSheet) h.hideSheet(); }); // hojas técnicas ocultas
   if (!prop_('SECRETO')) prop_('SECRETO', azar_() + azar_());
   var raiz = DriveApp.getFileById(ss.getId()).getParents(), padre = raiz.hasNext() ? raiz.next() : DriveApp.getRootFolder();
   if (!prop_('CARPETA_FOTOS')) prop_('CARPETA_FOTOS', padre.createFolder('Control de jornada - Fotos y soportes (privado)').getId());
   if (!prop_('CARPETA_RESPALDOS')) prop_('CARPETA_RESPALDOS', padre.createFolder('Control de jornada - Copias de seguridad').getId());
   var hayAdmin = leer('Usuarios').some(function (u) { return u.rol === 'admin' && u.hash; });
   if (!hayAdmin && !prop_('CODIGO_ADMIN')) prop_('CODIGO_ADMIN', 'ADM-' + azar_().substr(0, 10).toUpperCase());
-  if (!cfg_().codigoEmpresa) cfgSet_('codigoEmpresa', codigo6_());
+  if (!cfg_().codigoEmpresa) cfgSet_('codigoEmpresa', codigoLargo_());
   ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
   ScriptApp.newTrigger('tareaCada5').timeBased().everyMinutes(5).create();
   ScriptApp.newTrigger('tareaCada15').timeBased().everyMinutes(15).create();
   ScriptApp.newTrigger('tareaDiaria').timeBased().atHour(2).everyDays(1).create();
   var s1 = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1'); if (s1 && s1.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(s1);
-  aviso_('Instalación lista.\n\n' + (prop_('CODIGO_ADMIN') ? 'Código del primer administrador (un solo uso):\n' + prop_('CODIGO_ADMIN') + '\n\nÚsalo como "código de activación" al registrarte en la aplicación.\n\n' : 'Ya existe un administrador.\n\n') +
-    'Siguiente paso: Implementar > Nueva implementación > Aplicación web (Ejecutar como: yo · Acceso: cualquier persona) y copiar la URL en config.js.');
+  var url = urlServicio_();
+  aviso_('Instalación lista.\n\n' + (prop_('CODIGO_ADMIN') ? 'Código del primer administrador (un solo uso): ' + prop_('CODIGO_ADMIN') + '\nLo vuelves a ver en el menú Control de jornada.\n\n' : 'Ya existe un administrador.\n\n') +
+    (url ? 'Ya está publicada. Usa el menú «2. Ver el enlace de mi empresa».' : 'Falta un paso: Extensiones → Apps Script → botón azul «Implementar» → «Nueva implementación» → tipo «Aplicación web» → Ejecutar como: Yo · Quién tiene acceso: Cualquier persona → Implementar.\nLuego vuelve aquí y usa el menú «2. Ver el enlace de mi empresa».'));
+}
+function urlServicio_() { try { return ScriptApp.getService().getUrl() || ''; } catch (e) { return ''; } }
+function enlaceEmpresa_() {
+  var url = urlServicio_(), m = /\/s\/([A-Za-z0-9_-]{20,})\//.exec(url), app = (cfg_().urlApp || APP_PREDETERMINADA || '').replace(/[#?].*$/, '');
+  return { url: url, id: m ? m[1] : '', enlace: m && app ? app + '#/c/' + m[1] : '' };
+}
+function verEnlace() {
+  var e = enlaceEmpresa_();
+  if (!e.url) return aviso_('Todavía no está publicada. Extensiones → Apps Script → «Implementar» → «Nueva implementación» → «Aplicación web» → Ejecutar como: Yo · Acceso: Cualquier persona → Implementar. Después vuelve a este menú.');
+  var cuerpo = e.enlace ? '<p>Enlace de tu empresa. Ábrelo, ingresa con tu cédula y el código del primer administrador, y compártelo con tu personal:</p><p><a href="' + html_(e.enlace) + '" target="_blank">' + html_(e.enlace) + '</a></p>'
+    : '<p>Código de conexión (pégalo en la página de la aplicación):</p><p style="font-family:monospace;word-break:break-all;background:#eee;padding:8px">' + html_(e.id) + '</p>';
+  try { SpreadsheetApp.getUi().showModalDialog(HtmlService.createHtmlOutput('<div style="font-family:sans-serif;line-height:1.5;word-break:break-all">' + cuerpo + '</div>').setWidth(520).setHeight(220), 'Enlace de tu empresa'); } catch (x) { Logger.log(e.enlace || e.id); }
 }
 function verCodigoAdmin() { aviso_(prop_('CODIGO_ADMIN') ? 'Código del primer administrador: ' + prop_('CODIGO_ADMIN') : 'El código ya fue usado. Los nuevos administradores se crean desde el panel.'); }
 function respaldarAhora() { aviso_(respaldar_()); }
@@ -56,10 +76,10 @@ function tareaCada5() { tarea_('cada5', function () {
     var u = buscar('Usuarios', 'cedula', p.cedula); if (u && u.email) correo_(u.email, 'Tu permiso no fue respondido a tiempo', 'Tu solicitud del ' + p.fechaSalida + ' venció sin respuesta. Comunícate con tu jefe o con el administrador.');
   });
   if (!c.recordatorioCorreo) return;
-  var marc = leer('Marcaciones', 15000), incs = leer('Incapacidades'), cs = {}; centros_().forEach(function (x) { cs[x.id] = x; });
+  var marc = leer('Marcaciones', 30000), incs = leer('Incapacidades'), cs = {}; centros_().forEach(function (x) { cs[x.id] = x; });
   leer('Usuarios').forEach(function (u) {
     if (u.estado !== 'activo' || !u.email) return;
-    var hor = horarioDe_(cs[u.centroId], a.fecha); if (!hor) return;
+    var hor = horarioDe_(cs[u.centroId], a.fecha, u.cedula); if (!hor) return;
     var d = diasDe_(marc, u.cedula, a.fecha, a.fecha)[0] || {}, rec = +c.recordatorioMin || 5;
     [['entrada', hor.e, !d.entrada], ['sal_alm', hor.ai, d.entrada && !d.salAlm && !d.salida], ['ent_alm', hor.af, d.salAlm && !d.entAlm && !d.salida], ['salida', hor.s, d.entrada && !d.salida]].forEach(function (x) {
       if (!x[1] || !x[2]) return; var t = Motor.aMin(x[1]) + rec;
@@ -72,21 +92,32 @@ function tareaCada5() { tarea_('cada5', function () {
 
 /** Cada 15 minutos: personas que no se presentaron y jornadas que quedaron sin salida. */
 function tareaCada15() { tarea_('cada15', function () {
-  var a = ahora_(), c = cfg_(), ahoraMin = Motor.aMin(a.hora), marc = leer('Marcaciones', 15000), incs = leer('Incapacidades'), cs = {}; centros_().forEach(function (x) { cs[x.id] = x; });
-  var aus = lista_('AVISO_AUSENCIA', a.fecha), inc = lista_('AVISO_INCOMPLETO', a.fecha), ayer = Motor.sumar(a.fecha, -1);
+  var a = ahora_(), c = cfg_(), ahoraMin = Motor.aMin(a.hora), marc = leer('Marcaciones', 30000), incs = leer('Incapacidades'), cs = {}; centros_().forEach(function (x) { cs[x.id] = x; });
+  var aus = lista_('AVISO_AUSENCIA', a.fecha), inc = lista_('AVISO_INCOMPLETO', a.fecha), fat = lista_('AVISO_FATIGA', a.fecha), ayer = Motor.sumar(a.fecha, -1);
   leer('Usuarios').forEach(function (u) {
     if (u.estado !== 'activo') return;
-    var hor = horarioDe_(cs[u.centroId], a.fecha), d = diasDe_(marc, u.cedula, ayer, a.fecha), hoy = null, prev = null;
+    var hor = horarioDe_(cs[u.centroId], a.fecha, u.cedula), d = diasDe_(marc, u.cedula, ayer, a.fecha), hoy = null, prev = null;
     d.forEach(function (x) { if (x.fecha === a.fecha) hoy = x; else prev = x; });
     if (hor && !hoy && aus.l.indexOf(u.cedula) < 0 && ahoraMin >= Motor.aMin(hor.e) + (+c.minutosAusencia || 60) && !cubierto_(u.cedula, a.fecha, incs)) {
       aus.l.push(u.cedula); alertar_('ausencia', u.cedula, 'No ha registrado entrada hoy. Su horario empezaba a las ' + hor.e + (cs[u.centroId] ? ' en ' + cs[u.centroId].nombre : '') + ' y no tiene permiso ni incapacidad registrados.');
+    }
+    // Control de fatiga: jornada abierta que se acerca al máximo de horas continuas
+    var ab = hoy && hoy.entrada && !hoy.salida ? hoy : (prev && prev.entrada && !prev.salida ? prev : null);
+    if (ab && +c.fatigaHorasMax > 0 && fat.l.indexOf(u.cedula) < 0) {
+      var tr = (isoMs_(a.iso) - isoMs_(ab.fecha + 'T' + ab.entrada)) / 60000;
+      if (ab.salAlm && ab.entAlm) tr -= Math.max(0, Motor.aMin(ab.entAlm) - Motor.aMin(ab.salAlm));
+      if (tr < 16 * 60 && tr >= c.fatigaHorasMax * 60 - (+c.fatigaAvisoMin || 0)) {
+        fat.l.push(u.cedula);
+        alertar_('fatiga', u.cedula, 'Lleva ' + (Math.round(tr / 6) / 10) + ' h de trabajo continuo desde las ' + ab.entrada + (cs[ab.centroId || u.centroId] ? ' en ' + cs[ab.centroId || u.centroId].nombre : '') + ' y sigue sin marcar salida. Límite configurado: ' + c.fatigaHorasMax + ' h. Verifique su estado y ordene el relevo o el descanso.');
+        if (u.email) correo_(u.email, 'Llevas muchas horas de trabajo continuo', 'Hola ' + u.nombre.split(' ')[0] + ', llevas cerca de ' + c.fatigaHorasMax + ' horas de trabajo. Avisa a tu jefe, toma una pausa y, si ya terminaste, marca tu salida: ' + c.urlApp);
+      }
     }
     if (prev && prev.entrada && !prev.salida && inc.l.indexOf(u.cedula) < 0 && isoMs_(a.iso) - isoMs_(prev.fecha + 'T' + prev.entrada) > 16 * 3600000) {
       inc.l.push(u.cedula); alertar_('incompleto', u.cedula, 'La jornada del ' + prev.fecha + ' quedó sin salida. Mientras no se complete, ese día no suma horas.');
       if (u.email) correo_(u.email, 'Te faltó marcar la salida de ayer', 'Tu jornada del ' + prev.fecha + ' quedó sin salida. Entra a la aplicación y usa "Se me olvidó marcar" para poner la hora en que saliste: ' + c.urlApp);
     }
   });
-  prop_('AVISO_AUSENCIA', JSON.stringify(aus)); prop_('AVISO_INCOMPLETO', JSON.stringify(inc));
+  prop_('AVISO_AUSENCIA', JSON.stringify(aus)); prop_('AVISO_INCOMPLETO', JSON.stringify(inc)); prop_('AVISO_FATIGA', JSON.stringify(fat));
 }); }
 
 /** Diaria (2:00 a. m.): retención de fotos y GPS, sesiones vencidas, resumen de extras y copia de seguridad. */
@@ -112,6 +143,9 @@ function limpiarDatos_() {
     if (v[i][iLa] !== '' && f < limGps) { v[i][iLa] = ''; v[i][iLn] = ''; v[i][iPr] = ''; cambios++; }
   }
   if (cambios) { h.getRange(2, 1, n, cols.length).setValues(v); sucio_('Marcaciones'); }
+  ['Alertas', 'Errores'].forEach(function (nh) { // las bitácoras con datos personales también caducan
+    var hh = hoja_(nh), k = hh.getLastRow() - 1; if (k < 1) return; var vv = hh.getRange(2, 1, k, 1).getValues(), q = 0;
+    while (q < vv.length && String(vv[q][0]).substr(0, 10) < limGps) q++; if (q) { hh.deleteRows(2, q); sucio_(nh); } });
   prop_('ULTIMA_LIMPIEZA', a.iso + ' · ' + borradas + ' foto(s) eliminada(s)');
 }
 

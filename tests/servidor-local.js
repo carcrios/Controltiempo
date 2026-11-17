@@ -1,6 +1,6 @@
 // Servidor de demostración local: sirve el sitio compilado y el backend real sobre el simulador (datos en memoria).
 // Uso: (cd web && npm run build) && node tests/servidor-local.js  →  http://localhost:8787
-// Administrador: cédula 79000001 / clave demo2026 · Trabajador: cédula 1020333444 / clave demo2026 · Clave de firma del jefe: 4821
+// Administrador: cédula 79000001 / clave demo2026 · Trabajador: cédula 1020333444 / clave demo2026 · Clave de firma del jefe: 482173
 const http = require('http'), fs = require('fs'), path = require('path'), { crear } = require('./simulador');
 const X = crear(), { S, api } = X, sitio = path.join(__dirname, '../docs');
 const AHORA = process.env.AHORA; // opcional: fija la hora del servidor, ej. 2026-11-13T10:40:00-05:00
@@ -13,8 +13,8 @@ const ok = (r) => { if (!r.ok) throw new Error(r.e + ' ' + r.m); return r.d; };
   ok(api('adminConfigGuardar', { empresa: { nombre: 'Montajes Andinos S.A.S.', nit: '900.123.456-7', correoDatos: 'datos@montajesandinos.co' }, correoAlertas: 'rrhh@montajesandinos.co', fotoProbabilidad: 0, urlApp: 'http://localhost:8787/' }, adm));
   const c1 = ok(api('adminCentroGuardar', { nombre: 'Planta Tocancipá', cliente: 'Cervecería', lat: 4.65, lng: -74.1, radio: 150, horario: { 1: H, 2: H, 3: H, 4: H, 5: H }, tol: 5 }, adm));
   const c2 = ok(api('adminCentroGuardar', { nombre: 'Bodega Funza', cliente: 'Bebidas', lat: 4.71, lng: -74.2, radio: 200, horario: { 1: H, 2: H, 3: H, 4: H, 5: H, 6: { e: '07:00', s: '11:00' } }, tol: 10 }, adm));
-  ok(api('adminJefeGuardar', { nombre: 'Jorge Medina', cargo: 'Director de obra', whatsapp: '3001234567', email: 'jorge@montajesandinos.co', pin: '4821' }, adm));
-  ok(api('adminJefeGuardar', { nombre: 'Luz Dary Peña', cargo: 'Coordinadora HSEQ', whatsapp: '3009876543', pin: '4821' }, adm));
+  ok(api('adminJefeGuardar', { nombre: 'Jorge Medina', cargo: 'Director de obra', whatsapp: '3001234567', email: 'jorge@montajesandinos.co', pin: '482173' }, adm));
+  ok(api('adminJefeGuardar', { nombre: 'Luz Dary Peña', cargo: 'Coordinadora HSEQ', whatsapp: '3009876543', pin: '482173' }, adm));
   const gente = [['1020333444', 'Pedro Pérez Gómez', 'Soldador', c1.id, 1750905], ['52111222', 'Luisa Gómez Ruiz', 'Auxiliar HSEQ', c1.id, 2400000], ['80222333', 'Carlos Méndez', 'Mecánico montador', c2.id, 2100000], ['1033444555', 'Yeison Castro', 'Ayudante', c2.id, 1750905], ['39555666', 'Marta Quintero', 'Almacenista', c1.id, 1900000]];
   const tk = {};
   gente.forEach(([ced, nombre, cargo, centroId, salario]) => { const r = ok(api('adminPersonaGuardar', { cedula: ced, nombre, cargo, centroId, salario, ingreso: '2025-03-10' }, adm)); tk[ced] = ok(api('registro', { cedula: ced, codigo: r.codigo, clave: 'demo2026', consentimiento: C })).token; });
@@ -40,7 +40,7 @@ const TIPOS = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
 http.createServer((req, res) => {
   if (req.method === 'POST') { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(S.doPost({ postData: { contents: b } }).texto); }); return; }
   const u = req.url.split('?')[0];
-  if (u === '/config.js') { res.writeHead(200, { 'Content-Type': 'text/javascript' }); return res.end("window.CONFIG={API_URL:'/api'};"); }
+  if (u === '/config.js') { res.writeHead(200, { 'Content-Type': 'text/javascript' }); return res.end(process.env.ENLACE ? "window.CONFIG={BASE_API:'/s/'};" : "window.CONFIG={API_URL:'/api'};"); }
   const f = path.join(sitio, u === '/' ? 'index.html' : u);
   if (!f.startsWith(sitio) || !fs.existsSync(f)) { res.writeHead(404); return res.end('no'); }
   res.writeHead(200, { 'Content-Type': TIPOS[path.extname(f)] || 'application/octet-stream' }); fs.createReadStream(f).pipe(res);

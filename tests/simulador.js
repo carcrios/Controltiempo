@@ -8,7 +8,7 @@ function crear() {
   const hojaObj = (n) => ({
     getName: () => n, getLastRow: () => hojas[n].length, getMaxRows: () => 1000, setFrozenRows() { },
     appendRow(r) { hojas[n].push(r.map(x => String(x).replace(/^'/, ''))); },
-    deleteRow(i) { hojas[n].splice(i - 1, 1); },
+    deleteRow(i) { hojas[n].splice(i - 1, 1); }, deleteRows(i, k) { hojas[n].splice(i - 1, k); },
     getRange(r, c, nr = 1, nc = 1) {
       const api = {
         getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => (hojas[n][r - 1 + i] || [])[c - 1 + j] ?? '')),
@@ -35,7 +35,7 @@ function crear() {
   });
   const G = {
     SpreadsheetApp: { getActiveSpreadsheet: () => ss, openById: () => ss, getUi: () => { throw new Error('sin interfaz'); } },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; } }) },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }, deleteProperty: k => { delete props[k]; }, deleteAllProperties: () => { Object.keys(props).forEach((k) => delete props[k]); } }) },
     CacheService: { getScriptCache: () => ({ get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; } }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock() { } }) },
     Utilities: {
@@ -50,18 +50,20 @@ function crear() {
     DriveApp: { getFolderById: carpeta, getFileById: (id) => { if (id !== 'SS1' && !archivos[id]) throw new Error('no existe'); return archivo(id); }, getRootFolder: () => carpeta('RAIZ') },
     MailApp: { getRemainingDailyQuota: () => 100, sendEmail: (m) => { correos.push(m); } },
     ScriptApp: {
+      getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/AKfycbTESTtestTESTtestTEST12345/exec' }),
       getProjectTriggers: () => disparadores.map(f => ({ getHandlerFunction: () => f })), deleteTrigger() { disparadores.length = 0; },
       newTrigger: (f) => { const c = { timeBased: () => c, everyMinutes: () => c, atHour: () => c, everyDays: () => c, create: () => { disparadores.push(f); } }; return c; }
     },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (t) => ({ texto: t, setMimeType() { return this; } }) },
+    HtmlService: { createHtmlOutput: (h) => ({ html: h, setTitle() { return this; } }) },
     Logger: { log() { } }
   };
   archivos.SS1 = { nombre: 'principal', carpeta: 'RAIZ', creado: new Date(), bytes: [], tipo: 'sheet' };
   const dir = path.join(__dirname, '../apps-script');
-  const codigo = ['Motor.gs', 'Base.gs', 'Servicios.gs', 'Tareas.gs'].map(f => fs.readFileSync(path.join(dir, f), 'utf8').replace("if (typeof module !== 'undefined') module.exports = Motor;", '')).join('\n');
+  const codigo = ['Motor.gs', 'Base.gs', 'Servicios.gs', 'Turnos.gs', 'Informes.gs', 'Tareas.gs'].map(f => fs.readFileSync(path.join(dir, f), 'utf8').replace("if (typeof module !== 'undefined') module.exports = Motor;", '')).join('\n');
   const nombres = Object.keys(G);
   const S = new Function(...nombres, codigo + `
-    ;return { doPost, instalar, tareaCada5, tareaCada15, tareaDiaria, limpiarDatos_, respaldar_, prop_, leer, cfgSet_, Motor,
+    ;return { doPost, doGet, instalar, tareaCada5, tareaCada15, tareaDiaria, limpiarDatos_, respaldar_, prop_, leer, cfgSet_, Motor,
       ahora: function (x) { _AHORA = x; }, limpiar: function () { _c = {}; _cfg = null; } };`)(...nombres.map(n => G[n]));
   const api = (a, d, t) => JSON.parse(S.doPost({ postData: { contents: JSON.stringify({ a, d, t }) } }).texto);
   return { S, api, hojas, props, cache, archivos, correos };

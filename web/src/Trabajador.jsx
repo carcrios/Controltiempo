@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SwipeToConfirm } from '@elizabthpazp/intera-ui';
 import { Bell, CalendarDays, Camera, Check, Clock, Download, FileText, History, KeyRound, LogOut, MapPin, MessageCircle, Plus, Printer, ArrowLeft, UserRound, Wallet } from 'lucide-react';
-import { api, bandeja, reintentable } from './api.js';
+import { api, bandeja, reintentable, reloj } from './api.js';
 import { Aviso, Boton, Campo, Estado, Hoja, Insignia, Tarjeta, Vacio, useAvisos, useCarga, useForm, useOscuro, Confirmar } from './ui.jsx';
-import { ErrorPermiso, NOMBRE_TIPO, CORTO_TIPO, TIPOS, ahoraISO, comprimir, comprimirArchivo, fechaCorta, fechaLarga, horas, horasDec, hoyISO, idNuevo, notificacionesActivas, pedirNotificaciones, pesos, programarRecordatorios, sumarDias, ubicar } from './util.js';
+import { ErrorPermiso, NOMBRE_TIPO, CORTO_TIPO, TIPOS, ahoraISO, comoPermitir, comprimir, comprimirArchivo, fechaCorta, fechaLarga, horas, horasDec, hoyISO, idNuevo, notificacionesActivas, pedirNotificaciones, pesos, programarRecordatorios, sumarDias, ubicar } from './util.js';
 import { DetallePermiso, nombreEstado, tonoPermiso } from './Firma.jsx';
 import { PieLegal } from './Legal.jsx';
+import { rangoRapido } from './Informes.jsx';
 
 /* ---------- Cámara: la foto se toma en el momento y se comprime en el celular ---------- */
 function Camara({ tipo, alTerminar }) {
@@ -18,16 +19,16 @@ function Camara({ tipo, alTerminar }) {
         const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 960 } }, audio: false });
         if (!vivo) return s.getTracks().forEach((t) => t.stop());
         flujo.current = s; video.current.srcObject = s; await video.current.play(); setLista(true);
-      } catch (e) { setError(e.name === 'NotAllowedError' ? 'La cámara está bloqueada. Para marcar debes permitirla: toca el candado junto a la dirección de la página → Permisos → Cámara → Permitir.' : 'No se pudo abrir la cámara de este dispositivo.'); }
+      } catch (e) { setError(e.name === 'NotAllowedError' ? 'bloqueo' : 'falla'); }
     })();
     return () => { vivo = false; flujo.current?.getTracks().forEach((t) => t.stop()); };
   }, []);
   return <div className="camara" role="dialog" aria-modal="true" aria-label="Tomar foto para la marcación">
-    {error ? <div className="barra" style={{ flex: 1, justifyContent: 'center' }}><Camera size={40} aria-hidden="true" /><p role="alert">{error}</p><Boton variante="acento" onClick={() => alTerminar(null, true)}>Entendido</Boton></div> : <>
+    {error ? <div className="barra" style={{ flex: 1, justifyContent: 'center' }}><Camera size={40} aria-hidden="true" /><p role="alert">{error === 'bloqueo' ? 'La cámara está bloqueada y esta marcación pide foto. ' + comoPermitir('Cámara') : 'No se pudo abrir la cámara de este dispositivo. Cierra otras aplicaciones que la estén usando e intenta de nuevo.'}</p><Boton variante="acento" onClick={() => alTerminar(null, error)}>Entendido</Boton></div> : <>
       <video ref={video} playsInline muted aria-label="Vista de la cámara frontal" />
       <div className="barra"><p><strong>{NOMBRE_TIPO[tipo]}:</strong> esta marcación pide una foto de tu rostro.</p>
         <button className="disparo" disabled={!lista} aria-label="Tomar la foto" onClick={() => alTerminar(comprimir(video.current))} />
-        <Boton variante="texto" style={{ color: '#fff' }} onClick={() => alTerminar(null, false)}>Cancelar (no se registrará la marcación)</Boton></div></>}
+        <Boton variante="texto" style={{ color: '#fff' }} onClick={() => alTerminar(null, 'cancelo')}>Cancelar (no se registrará la marcación)</Boton></div></>}
   </div>;
 }
 
@@ -40,18 +41,29 @@ function Reloj() {
 
 /* ---------- Inicio: tarjeta de tiempo + resumen de horas y dinero ---------- */
 function Inicio({ yo, actualizar, recargar }) {
-  const { hoy, resumen, centros, usuario, cfg } = yo, avisos = useAvisos(), oscuro = useOscuro();
+  const { resumen, centros, usuario, cfg } = yo, avisos = useAvisos(), oscuro = useOscuro();
   const [fase, setFase] = useState(null), [vuelta, setVuelta] = useState(0), [bloqueo, setBloqueo] = useState(null), [camara, setCamara] = useState(null), [olvido, setOlvido] = useState(false), [detalle, setDetalle] = useState(false);
-  const [centroSel, setCentroSel] = useState(hoy.centroId || usuario.centroId || ''), [pend, setPend] = useState(() => bandeja.lista().length);
+  const [centroSel, setCentroSel] = useState(yo.hoy.centroId || usuario.centroId || ''), [pend, setPend] = useState(() => bandeja.lista().length), [rech, setRech] = useState(() => bandeja.rechazadas());
+  // Estado del día: si lo guardado es de ayer (se abrió sin señal) se empieza un día nuevo, y se superpone lo que espera en la bandeja.
+  const hoy = useMemo(() => {
+    let h = yo.hoy; const abierta = h.marcas?.entrada && !h.marcas?.salida;
+    if (h.fecha !== hoyISO() && !abierta) h = { ...h, fecha: hoyISO(), marcas: {}, fotoPlan: {}, festivo: false, viejo: true };
+    const marcas = { ...h.marcas }; bandeja.lista().forEach((m) => { if (!m.manual && m.hora.slice(0, 10) >= h.fecha && !marcas[m.tipo]) marcas[m.tipo] = m.hora.slice(11); });
+    return { ...h, marcas, siguiente: !marcas.entrada ? 'entrada' : marcas.salida ? null : !marcas.sal_alm ? 'sal_alm' : !marcas.ent_alm ? 'ent_alm' : 'salida' };
+  }, [yo.hoy, pend]);
   const pedirFoto = (tipo) => new Promise((ok) => setCamara({ tipo, ok }));
 
   const enviarPendientes = useCallback(async () => {
     if (!bandeja.lista().length || !navigator.onLine) return;
-    const r = await bandeja.enviar(); setPend(r.pendientes);
-    if (r.enviadas) { avisos.ok(`${r.enviadas} marcación(es) guardada(s) sin señal ya se enviaron.`); recargar(); }
-    r.rechazadas.forEach((m) => avisos.error(`No se aceptó “${NOMBRE_TIPO[m.tipo]}” de las ${m.hora.slice(11)}: ${m.rechazo}`, 14000));
+    const r = await bandeja.enviar(); setPend(r.pendientes); setRech(bandeja.rechazadas());
+    if (r.enviadas) { avisos.ok(`${r.enviadas} marcación(es) guardada(s) en tu celular ya se enviaron.`); recargar(); }
+    if (r.rechazadas.length) avisos.error('Una marcación guardada no fue aceptada. Mira el aviso en esta pantalla.', 10000);
   }, [avisos, recargar]);
-  useEffect(() => { enviarPendientes(); window.addEventListener('online', enviarPendientes); return () => window.removeEventListener('online', enviarPendientes); }, [enviarPendientes]);
+  useEffect(() => { // se reintenta al abrir, al volver la señal, al volver a la aplicación y cada 45 s mientras haya pendientes
+    enviarPendientes(); const v = () => { if (document.visibilityState === 'visible') enviarPendientes(); };
+    window.addEventListener('online', enviarPendientes); document.addEventListener('visibilitychange', v); const i = pend > 0 ? setInterval(enviarPendientes, 45000) : null;
+    return () => { window.removeEventListener('online', enviarPendientes); document.removeEventListener('visibilitychange', v); if (i) clearInterval(i); };
+  }, [enviarPendientes, pend]);
   useEffect(() => { programarRecordatorios(hoy, cfg.recordatorioMin); }, [hoy, cfg.recordatorioMin]);
 
   async function marcar(tipo, extra = {}) {
@@ -59,11 +71,12 @@ function Inicio({ yo, actualizar, recargar }) {
     setBloqueo(null); setFase('gps');
     let pos;
     try { pos = await ubicar(); }
-    catch (e) { fin(); setBloqueo(e instanceof ErrorPermiso ? e : new ErrorPermiso('gps', 'No se pudo obtener la ubicación.', false)); if (e.bloqueado) api('bloqueo', { que: 'gps', tipo }).catch(() => {}); return false; }
-    const m = { id: idNuevo(), tipo, ...pos, centroId: centroSel, hora: ahoraISO(), ...extra };
+    catch (e) { fin(); const b = e instanceof ErrorPermiso ? e : new ErrorPermiso('gps', 'No se pudo obtener la ubicación.', false); setBloqueo(b); if (extra.manual) avisos.error(b.message, 12000); if (e.bloqueado) api('bloqueo', { que: 'gps', tipo }).catch(() => {}); return false; }
+    const m = { id: idNuevo(), tipo, ...pos, centroId: centroSel, hora: ahoraISO(reloj.ahora()), ...extra };
     const tomar = async () => {
-      setFase('foto'); const foto = await pedirFoto(tipo);
-      if (!foto) { fin(); setBloqueo(new ErrorPermiso('camara', 'Sin la foto no se puede registrar esta marcación. Vuelve a deslizar y toma la foto.', true)); api('bloqueo', { que: 'camara', tipo }).catch(() => {}); return false; }
+      setFase('foto'); const { foto, motivo } = await pedirFoto(tipo);
+      if (!foto) { fin(); const avisa = motivo !== 'falla'; // una falla técnica de la cámara no se reporta como bloqueo
+        setBloqueo(new ErrorPermiso('camara', 'Sin la foto no se puede registrar esta marcación. Vuelve a deslizar y toma la foto.', avisa)); if (avisa) api('bloqueo', { que: 'camara', tipo }).catch(() => {}); return false; }
       m.foto = foto; return true;
     };
     if (!extra.manual && hoy.fotoPlan?.[tipo] && !(await tomar())) return false;
@@ -78,7 +91,7 @@ function Inicio({ yo, actualizar, recargar }) {
         if (reintentable(e)) {
           bandeja.agregar(m); setPend(bandeja.lista().length);
           if (!extra.manual) { const marcas = { ...hoy.marcas, [tipo]: m.hora.slice(11) }; actualizar({ hoy: { ...hoy, marcas, siguiente: tipo === 'salida' ? null : TIPOS[TIPOS.indexOf(tipo) + 1] } }); }
-          fin(); avisos.info(`Sin señal: “${NOMBRE_TIPO[tipo]}” quedó guardada en tu celular y se enviará sola al volver la conexión.`, 8000); return true;
+          fin(); avisos.info(`${e.cod === 'OCUPADO' ? 'El servidor está ocupado' : 'Sin señal'}: “${NOMBRE_TIPO[tipo]}” de las ${m.hora.slice(11)} quedó guardada en tu celular y se enviará sola en un momento.`, 8000); return true;
         }
         fin(); avisos.error(e); return false;
       }
@@ -110,6 +123,9 @@ function Inicio({ yo, actualizar, recargar }) {
     </section>
 
     {bloqueo && <Aviso tono="peligro"><strong>{bloqueo.que === 'camara' ? 'Falta la foto' : 'Falta la ubicación'}.</strong> {bloqueo.message}{bloqueo.bloqueado && ' Se avisó al administrador de este intento.'}</Aviso>}
+    {hoy.viejo && <Aviso tono="aviso">No se pudo actualizar con el servidor. Puedes marcar: se guardará en tu celular.</Aviso>}
+    {rech.map((m) => <Aviso key={m.id} tono="peligro"><strong>No se aceptó “{NOMBRE_TIPO[m.tipo]}” del {fechaCorta(m.hora)} a las {m.hora.slice(11)}.</strong> {m.rechazo} Si de verdad marcaste a esa hora, regístrala con «Se me olvidó marcar» o pide el ajuste al administrador.
+      <div className="fila" style={{ marginTop: 8 }}><Boton chico variante="secundario" onClick={() => { setOlvido({ tipo: m.tipo, fecha: m.hora.slice(0, 10) }); }}>Registrarla ahora</Boton><Boton chico variante="texto" onClick={() => { bandeja.descartarRechazada(m.id); setRech(bandeja.rechazadas()); }}>Descartar</Boton></div></Aviso>)}
     {pend > 0 && <Aviso tono="aviso"><strong>{pend} marcación(es) por enviar.</strong> Están guardadas en este celular; se envían solas al volver la señal. <Boton chico variante="secundario" onClick={enviarPendientes}>Enviar ahora</Boton></Aviso>}
     {resumen.incompletos?.length > 0 && <Aviso tono="aviso"><strong>Te faltó marcar la salida</strong> el {resumen.incompletos.map(fechaCorta).join(', ')}. Mientras no la completes, ese día no suma horas. <Boton chico variante="secundario" onClick={() => setOlvido({ tipo: 'salida', fecha: resumen.incompletos[0] })}>Poner la hora en que salí</Boton></Aviso>}
     <Boton variante="secundario" icono={History} onClick={() => setOlvido({ tipo: sig || 'salida', fecha: hoy.fecha })}>Se me olvidó marcar</Boton>
@@ -129,14 +145,9 @@ function Inicio({ yo, actualizar, recargar }) {
       </div>
     </Tarjeta>
 
-    <Tarjeta titulo="Mis jornadas del periodo">
-      {resumen.dias.length === 0 ? <Vacio icono={CalendarDays} titulo="Aún no hay jornadas">Tu primera marcación de este periodo aparecerá aquí.</Vacio> :
-        <ul className="lista">{[...resumen.dias].reverse().map((d) => <li key={d.fecha}><div className="crece"><strong>{fechaCorta(d.fecha)}</strong>
-          <div className="suave chico num">{d.entrada || '—'} → {d.salida || (d.incompleto ? 'sin salida' : 'en curso')}{d.salAlm ? ` · almuerzo ${d.salAlm}${d.entAlm ? '–' + d.entAlm : ''}` : ''}</div></div>
-          <div className="derecha"><span className="num">{d.incompleto ? '—' : horas(d.min)}</span><div className="fila fin" style={{ gap: 4 }}>{d.tarde > 0 && <Insignia tono="aviso">+{d.tarde} min</Insignia>}{d.extra > 0 && <Insignia tono="info">{horas(d.extra)} extra</Insignia>}{d.incompleto && <Insignia tono="peligro">incompleta</Insignia>}</div></div></li>)}</ul>}
-    </Tarjeta>
+    <MisJornadas resumen={resumen} />
 
-    {camara && <Camara tipo={camara.tipo} alTerminar={(foto) => { camara.ok(foto); setCamara(null); }} />}
+    {camara && <Camara tipo={camara.tipo} alTerminar={(foto, motivo) => { camara.ok({ foto, motivo }); setCamara(null); }} />}
     <Olvido abierta={!!olvido} inicial={olvido || {}} cfg={cfg} hoy={hoy} alCerrar={() => setOlvido(false)} alEnviar={async (d) => { const ok = await marcar(d.tipo, { manual: true, fecha: d.fecha, hora: `${d.fechaHora}T${d.hora}`, motivo: d.motivo }); if (ok) { setOlvido(false); recargar(); } }} ocupado={ocupado} />
     <Hoja abierta={detalle} alCerrar={() => setDetalle(false)} titulo="Cómo se calcula tu estimado"><Liquidacion l={resumen} /><p className="suave chico">Valor de tu hora ordinaria: {pesos(resumen.valorHora)} (salario ÷ divisor mensual vigente). Las horas extra solo se pagan cuando el administrador las aprueba.</p></Hoja>
   </div>;
@@ -161,9 +172,9 @@ function Olvido({ abierta, inicial, cfg, hoy, alCerrar, alEnviar, ocupado }) {
 
 export function Liquidacion({ l }) {
   return <div>
-    {l.conceptos.map((c) => <div className="concepto" key={c.cod}><span>{c.concepto}</span><span className="cant num">{c.cantidad}</span><span className={`num ${c.valor < 0 ? 'neg' : ''}`}>{pesos(c.valor)}</span></div>)}
+    {l.conceptos.map((c, i) => <div className="concepto" key={i}><span>{c.concepto}</span><span className="cant num">{c.cantidad}</span><span className={`num ${c.valor < 0 ? 'neg' : ''}`}>{pesos(c.valor)}</span></div>)}
     <div className="total" style={{ borderTopWidth: 1, fontWeight: 600 }}><span>Total devengado</span><span className="num">{pesos(l.devengado)}</span></div>
-    {l.deduccionesDet.map((c) => <div className="concepto" key={c.cod}><span>{c.concepto}</span><span className="cant num">{c.cantidad}</span><span className="num neg">− {pesos(c.valor)}</span></div>)}
+    {l.deduccionesDet.map((c, i) => <div className="concepto" key={i}><span>{c.concepto}</span><span className="cant num">{c.cantidad}</span><span className="num neg">− {pesos(c.valor)}</span></div>)}
     <div className="total" style={{ marginTop: 8 }}><span>Neto</span><span className="num" style={{ fontSize: 'var(--t-5)' }}>{pesos(l.neto)}</span></div>
   </div>;
 }
@@ -192,6 +203,21 @@ function Pagos({ yo }) {
     <Tarjeta titulo="Mis desprendibles"><Estado carga={carga} lineas={3}>{(l) => l.length === 0 ? <Vacio icono={FileText} titulo="Aún no hay desprendibles">Aparecen aquí cuando la empresa cierra cada periodo de nómina.</Vacio> :
       <ul className="lista tocable">{l.map((n) => <li key={n.id}><button onClick={() => setSel(n)}><FileText size={22} aria-hidden="true" /><span className="crece"><strong>{fechaCorta(n.desde)} – {fechaCorta(n.hasta)}</strong></span><span className="num"><strong>{pesos(n.neto)}</strong></span></button></li>)}</ul>}</Estado></Tarjeta>
   </div>;
+}
+
+/* ---------- Mis jornadas en el periodo que la persona elija ---------- */
+const PERIODOS_YO = [['periodo', 'Periodo de pago'], ['semana', 'Esta semana'], ['semanaPasada', 'Semana pasada'], ['mes', 'Este mes'], ['mesPasado', 'Mes pasado'], ['30', 'Últimos 30 días']];
+function MisJornadas({ resumen }) {
+  const [k, setK] = useState('periodo'), carga = useCarga(() => (k === 'periodo' ? Promise.resolve(resumen) : api('miResumen', rangoRapido(k))), [k, k === 'periodo' ? resumen : null]);
+  return <Tarjeta titulo="Mis jornadas" accion={<select className="entrada" style={{ width: 'auto', minHeight: 36 }} aria-label="Periodo a consultar" value={k} onChange={(e) => setK(e.target.value)}>{PERIODOS_YO.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select>}>
+    <Estado carga={carga} lineas={4}>{(r) => <div className="pila">
+      <div className="mini-resumen">{[['Trabajadas', horasDec(r.horas.trabajadas)], ['Extra', horasDec(r.horas.extras + r.horas.extrasSinAprobar)], ['Llegadas tarde', r.tardanzas], ['Ausencias', r.ausencias]].map(([t, v]) => <div key={t}><span className="suave chico">{t}</span><strong className="num">{v}</strong></div>)}</div>
+      {k !== 'periodo' && <p className="suave chico">Neto estimado de esas fechas: <strong className="num" style={{ color: 'var(--c-texto)' }}>{pesos(r.neto)}</strong></p>}
+      {r.dias.length === 0 ? <Vacio icono={CalendarDays} titulo="Sin jornadas en estas fechas">Cuando marques, tus días aparecerán aquí.</Vacio> :
+        <ul className="lista">{[...r.dias].reverse().map((d) => <li key={d.fecha}><div className="crece"><strong>{fechaCorta(d.fecha)}</strong>
+          <div className="suave chico num">{d.entrada || '—'} → {d.salida || (d.incompleto ? 'sin salida' : 'en curso')}{d.salAlm ? ` · almuerzo ${d.salAlm}${d.entAlm ? '–' + d.entAlm : ''}` : ''}</div></div>
+          <div className="derecha"><span className="num">{d.incompleto ? '—' : horas(d.min)}</span><div className="fila fin" style={{ gap: 4 }}>{d.tarde > 0 && <Insignia tono="aviso">+{d.tarde} min</Insignia>}{d.extra > 0 && <Insignia tono="info">{horas(d.extra)} extra</Insignia>}{d.incompleto && <Insignia tono="peligro">incompleta</Insignia>}</div></div></li>)}</ul>}
+    </div>}</Estado></Tarjeta>;
 }
 
 /* ---------- Permisos ---------- */
@@ -272,19 +298,6 @@ function Perfil({ yo, recargar, alSalir }) {
     <Confirmar abierta={salir} titulo="Cerrar sesión" texto="Cerrar sesión" alCerrar={() => setSalir(false)} alConfirmar={alSalir}>Tendrás que ingresar de nuevo con tu cédula y contraseña.{bandeja.lista().length > 0 && <strong> Tienes marcaciones sin enviar que se perderán.</strong>}</Confirmar>
   </div>;
 }
-
-
-  // [NUEVO] Obtener geolocalización
-  const obtenerUbicacion = () => {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) return resolve(null);
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve(`${pos.coords.latitude},${pos.coords.longitude}`),
-        () => resolve(null),
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    });
-  };
 
 export default function Trabajador({ yo, actualizar, recargar, alSalir }) {
   const [tab, setTab] = useState('inicio');

@@ -11,7 +11,7 @@ function Clave({ etiqueta, ...p }) {
 
 export default function Acceso({ publico, alEntrar }) {
   const [paso, setPaso] = useState('cedula'), [f, campo, setF] = useForm({ cedula: '', clave: '', clave2: '', codigo: '', nombre: '', salario: '', email: '', telefono: '', datos: false, sensibles: false });
-  const [carga, setCarga] = useState(false), [err, setErr] = useState({}), avisos = useAvisos(), empresa = publico?.empresa;
+  const [carga, setCarga] = useState(false), [pista, setPista] = useState(null), [err, setErr] = useState({}), avisos = useAvisos(), empresa = publico?.empresa;
   const correr = async (fn) => { setCarga(true); setErr({}); try { await fn(); } catch (e) { setErr({ general: e.message, cod: e.cod }); } finally { setCarga(false); } };
   const ced = f.cedula.replace(/\D/g, '');
 
@@ -29,11 +29,14 @@ export default function Acceso({ publico, alEntrar }) {
       avisos.ok('Cuenta creada. ¡Bienvenido!'); alEntrar(r.token, r.usuario); }
     catch (e) { if (e.cod === 'CODIGO' || e.cod === 'DATOS' || e.cod === 'EXISTE') setPaso(e.cod === 'EXISTE' ? 'clave' : 'nuevo'); throw e; } });
 
+  const pedirCodigo = () => correr(async () => { const r = await api('recuperarPedir', { cedula: ced }); setPista(r); if (r.enviado) setPaso('codigo'); });
+  const cambiarConCodigo = (e) => { e.preventDefault(); if (f.clave.length < 6) return setErr({ clave: 'Mínimo 6 caracteres.' }); if (f.clave !== f.clave2) return setErr({ clave2: 'Las contraseñas no coinciden.' });
+    correr(async () => { const r = await api('recuperarCambiar', { cedula: ced, codigo: f.codigo.trim(), clave: f.clave, ...info() }); avisos.ok('Contraseña cambiada.'); alEntrar(r.token, r.usuario); }); };
   const n = { cedula: 1, clave: 2, nuevo: 2, permisos: 3 }[paso];
   return <main className="acceso" id="contenido"><div className="acceso-caja">
     <div className="logo"><div className="sello">{empresa?.logo ? <img src={empresa.logo} alt="" /> : <Clock size={28} aria-hidden="true" />}</div>
       <div><strong style={{ fontFamily: 'var(--f-titulo)', fontSize: 'var(--t-4)' }}>{empresa?.nombre || 'Control de jornada'}</strong><div className="suave chico">Control de jornada</div></div></div>
-    {paso !== 'cedula' && paso !== 'clave' && <div className="pasos" role="img" aria-label={`Paso ${n} de 3`}>{[1, 2, 3].map((i) => <span key={i} className={i <= n ? 'hecho' : ''} />)}</div>}
+    {(paso === 'nuevo' || paso === 'permisos') && <div className="pasos" role="img" aria-label={`Paso ${n} de 3`}>{[1, 2, 3].map((i) => <span key={i} className={i <= n ? 'hecho' : ''} />)}</div>}
     {err.general && <div style={{ marginBottom: 16 }}><Aviso tono="peligro">{err.general}</Aviso></div>}
 
     {paso === 'cedula' && <form className="pila" onSubmit={consultar} noValidate>
@@ -46,7 +49,21 @@ export default function Acceso({ publico, alEntrar }) {
       <Clave etiqueta="Contraseña" autoComplete="current-password" autoFocus {...campo('clave')} />
       <Boton type="submit" cargando={carga}>Entrar</Boton>
       <Boton variante="texto" icono={ArrowLeft} onClick={() => { setPaso('cedula'); setErr({}); setF((x) => ({ ...x, clave: '' })); }}>Usar otra cédula</Boton>
-      <p className="suave chico">¿Olvidaste la contraseña? Pide al administrador un código nuevo de activación.</p></form>}
+      <Boton variante="texto" onClick={() => { setErr({}); setPista(null); setF((x) => ({ ...x, clave: '', clave2: '', codigo: '' })); setPaso('olvido'); }}>Olvidé mi contraseña</Boton></form>}
+
+    {paso === 'olvido' && <div className="pila">
+      <h1>Recuperar contraseña</h1><p className="suave">Cédula {ced}. Te enviamos un código de 6 números al correo que tienes registrado. Vence en 15 minutos.</p>
+      {pista && !pista.enviado && <Aviso tono="aviso">{pista.sinCorreo ? 'Tu usuario no tiene un correo registrado.' : 'No fue posible enviarte el código.'} Pide al administrador un código nuevo de activación: con él creas otra contraseña.</Aviso>}
+      <Boton cargando={carga} onClick={pedirCodigo}>Enviarme el código</Boton>
+      <Boton variante="texto" icono={ArrowLeft} onClick={() => { setPaso('clave'); setErr({}); }}>Volver</Boton></div>}
+
+    {paso === 'codigo' && <form className="pila" onSubmit={cambiarConCodigo} noValidate>
+      <h1>Escribe el código</h1><p className="suave">Lo enviamos a {pista?.pista}. Revisa también la carpeta de correo no deseado.</p>
+      <Campo etiqueta="Código de 6 números" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={6} {...campo('codigo')} />
+      <Clave etiqueta="Contraseña nueva" autoComplete="new-password" ayuda="Mínimo 6 caracteres. No uses tu cédula ni 123456." error={err.clave} {...campo('clave')} />
+      <Clave etiqueta="Repite la contraseña" autoComplete="new-password" error={err.clave2} {...campo('clave2')} />
+      <Boton type="submit" cargando={carga} disabled={f.codigo.trim().length < 6}>Cambiar contraseña y entrar</Boton>
+      <Boton variante="texto" icono={ArrowLeft} onClick={() => { setPaso('olvido'); setErr({}); }}>Pedir otro código</Boton></form>}
 
     {paso === 'nuevo' && <form className="pila" onSubmit={validarNuevo} noValidate>
       <h1>Crea tu cuenta</h1><p className="suave">Cédula {ced}. Solo se hace una vez.</p>
@@ -54,7 +71,7 @@ export default function Acceso({ publico, alEntrar }) {
       <Campo etiqueta="Nombre completo" autoComplete="name" error={err.nombre} {...campo('nombre')} />
       <Campo etiqueta="Salario mensual" inputMode="numeric" placeholder="Ej.: 1750905" ayuda="Se usa para estimar lo que llevas ganado. El administrador lo valida." error={err.salario} {...campo('salario')} />
       <Campo etiqueta="Correo (opcional)" type="email" autoComplete="email" ayuda="Para recordatorios y respuesta de tus permisos." {...campo('email')} />
-      <Clave etiqueta="Crea tu contraseña" autoComplete="new-password" ayuda="Mínimo 6 caracteres." error={err.clave} {...campo('clave')} />
+      <Clave etiqueta="Crea tu contraseña" autoComplete="new-password" ayuda="Mínimo 6 caracteres. No uses tu cédula ni 123456." error={err.clave} {...campo('clave')} />
       <Clave etiqueta="Repite la contraseña" autoComplete="new-password" error={err.clave2} {...campo('clave2')} />
       <Boton type="submit">Continuar</Boton><Boton variante="texto" icono={ArrowLeft} onClick={() => { setPaso('cedula'); setErr({}); }}>Volver</Boton></form>}
 

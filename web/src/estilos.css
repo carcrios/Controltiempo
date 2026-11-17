@@ -266,3 +266,24 @@ button.indicador { cursor: pointer; } button.indicador:hover { background: var(-
   .admin { display: block; }
 }
 .solo-imprimir { display: none; }
+
+/* ---------- Informes ---------- */
+.filtros-informe { display: grid; gap: var(--e-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); align-items: end; }
+.filtros-informe > .fila { grid-column: 1 / -1; }
+.chips { display: flex; flex-wrap: wrap; gap: var(--e-2); max-height: 260px; overflow-y: auto; }
+.chip { all: unset; box-sizing: border-box; min-height: 40px; padding: 0 var(--e-3); display: inline-flex; align-items: center; border: 1.5px solid var(--c-borde-fuerte); border-radius: var(--r-pill); font-size: var(--t-2); cursor: pointer; background: var(--c-superficie); }
+.chip:hover { background: var(--c-superficie-2); } .chip:focus-visible { box-shadow: var(--foco); }
+.chip[aria-pressed="true"] { background: var(--c-primario); border-color: var(--c-primario); color: var(--c-sobre-primario); }
+.chip[aria-pressed="true"]::before { content: "✓ "; white-space: pre; }
+.barra-fila { display: grid; grid-template-columns: minmax(90px, 30%) 1fr auto; gap: var(--e-3); align-items: center; font-size: var(--t-2); }
+.barra-rotulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barra-pista { height: 14px; display: block; }
+.barra { display: block; height: 100%; background: var(--c-primario); border-radius: 0 4px 4px 0; min-width: 2px; transition: width var(--d-media); }
+.barra-fila:hover .barra { background: var(--c-primario-fuerte); }
+.barra-valor { min-width: 7ch; text-align: right; }
+.tooltip-grafica { position: absolute; top: 0; transform: translateX(-50%); background: var(--c-texto); color: var(--c-fondo); padding: var(--e-1) var(--e-2); border-radius: var(--r-1); font-size: var(--t-1); pointer-events: none; white-space: nowrap; box-shadow: var(--s-2); }
+.tabla tfoot td { border-top: 2px solid var(--c-texto); background: var(--c-superficie-2); }
+.mini-resumen { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--e-2); }
+.mini-resumen > div { display: flex; flex-direction: column; background: var(--c-superficie-2); border-radius: var(--r-2); padding: var(--e-2) var(--e-3); }
+.mini-resumen strong { font-family: var(--f-titulo); font-size: var(--t-4); }
+@media (max-width: 400px) { .mini-resumen { grid-template-columns: repeat(2, 1fr); } }

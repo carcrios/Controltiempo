@@ -18,16 +18,18 @@ export const idNuevo = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now
 
 /* ---------- Ubicación: obligatoria para marcar ---------- */
 export class ErrorPermiso extends Error { constructor(que, msg, bloqueado) { super(msg); this.que = que; this.bloqueado = bloqueado; } }
-export function ubicar() {
-  return new Promise((ok, mal) => {
-    if (!navigator.geolocation) return mal(new ErrorPermiso('gps', 'Este dispositivo no permite obtener la ubicación.', true));
-    navigator.geolocation.getCurrentPosition(
-      (p) => ok({ lat: p.coords.latitude, lng: p.coords.longitude, prec: Math.round(p.coords.accuracy) }),
-      (e) => mal(e.code === 1
-        ? new ErrorPermiso('gps', 'La ubicación está bloqueada. Para marcar debes permitirla: toca el candado junto a la dirección de la página → Permisos → Ubicación → Permitir, y vuelve a intentar.', true)
-        : new ErrorPermiso('gps', 'No se pudo obtener tu ubicación. Activa el GPS del celular, sal a un lugar despejado e intenta de nuevo.', false)),
-      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-  });
+const instalada = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+export const comoPermitir = (que) => /iphone|ipad/i.test(navigator.userAgent) ? `En el iPhone: Ajustes → Privacidad → ${que === 'Cámara' ? 'Cámara' : 'Localización'} → Safari → Permitir.`
+  : instalada() ? `Mantén presionado el ícono de la aplicación → Información → Permisos → ${que} → Permitir.` : `Toca el candado junto a la dirección de la página → Permisos → ${que} → Permitir.`;
+function pedirPosicion(precisa, ms) { return new Promise((ok, mal) => navigator.geolocation.getCurrentPosition((p) => ok({ lat: p.coords.latitude, lng: p.coords.longitude, prec: Math.round(p.coords.accuracy) }), mal, { enableHighAccuracy: precisa, timeout: ms, maximumAge: precisa ? 0 : 60000 })); }
+export async function ubicar() {
+  if (!navigator.geolocation) throw new ErrorPermiso('gps', 'Este dispositivo no permite obtener la ubicación.', true);
+  try { return await pedirPosicion(true, 15000); }
+  catch (e) {
+    if (e.code === 1) throw new ErrorPermiso('gps', 'La ubicación está bloqueada y sin ella no se puede marcar. ' + comoPermitir('Ubicación'), true);
+    try { return await pedirPosicion(false, 10000); } // bajo techo el GPS preciso falla: segundo intento con la red
+    catch (x) { throw new ErrorPermiso('gps', 'No se pudo obtener tu ubicación. Activa el GPS del celular, acércate a una ventana o sal a un lugar despejado e intenta de nuevo.', false); }
+  }
 }
 export function distancia(a, b, c, d) {
   const R = 6371000, r = Math.PI / 180, x = (c - a) * r, y = (d - b) * r, q = Math.sin(x / 2) ** 2 + Math.cos(a * r) * Math.cos(c * r) * Math.sin(y / 2) ** 2;

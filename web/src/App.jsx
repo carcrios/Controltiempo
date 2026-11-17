@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Clock, LogOut, ShieldCheck, UserRound, WifiOff } from 'lucide-react';
-import { api, sesion, configurada, alCaducarSesion, VERSION } from './api.js';
-import { Avisos, Boton, Aviso, Casilla, Esqueleto, useAvisos } from './ui.jsx';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Clock, LogOut, RefreshCw, ShieldCheck, UserRound, WifiOff } from 'lucide-react';
+import { api, sesion, configurada, alCaducarSesion, conexion, idDeTexto, urlDeId, reloj, VERSION } from './api.js';
+import { Avisos, Boton, Aviso, Campo, Casilla, Esqueleto, useAvisos } from './ui.jsx';
 import Acceso from './Acceso.jsx';
 import Legal, { PieLegal } from './Legal.jsx';
 import Firma from './Firma.jsx';
@@ -30,10 +30,35 @@ export function Cabecera({ empresa, children }) {
 }
 
 function SinConfigurar() {
-  return <main className="lectura" id="contenido"><h1>Falta un paso de instalación</h1>
-    <p className="suave">La página ya está publicada, pero todavía no sabe a qué hoja de cálculo conectarse.</p>
-    <ol><li>Abre el archivo <code>config.js</code> del repositorio.</li><li>Pega en <code>API_URL</code> la dirección de la aplicación web de Apps Script (termina en <code>/exec</code>).</li><li>Guarda el cambio y recarga esta página.</li></ol>
-    <p>El paso a paso completo está en el archivo <code>LEEME.md</code>.</p></main>;
+  const [v, setV] = useState(''), [err, setErr] = useState('');
+  const seguir = (e) => { e.preventDefault(); const id = idDeTexto(v); if (!id) return setErr('Ese código o enlace no es válido. Cópialo completo.'); location.hash = '#/c/' + id; };
+  return <main className="acceso" id="contenido"><form className="acceso-caja pila" onSubmit={seguir} noValidate>
+    <div className="logo"><div className="sello"><Clock size={28} aria-hidden="true" /></div><div><strong style={{ fontFamily: 'var(--f-titulo)', fontSize: 'var(--t-4)' }}>Control de jornada</strong></div></div>
+    <h1>Conecta con tu empresa</h1>
+    <p className="suave">Abre el enlace que te envió tu empresa. Si en cambio te dieron un código, pégalo aquí.</p>
+    <Campo como="textarea" etiqueta="Código o enlace de la empresa" value={v} onChange={(e) => setV(e.target.value)} error={err} autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+    <Boton type="submit" disabled={!v.trim()}>Continuar</Boton>
+  </form></main>;
+}
+
+// Enlace de empresa: #/c/<código>. Muestra a qué empresa se va a conectar el celular antes de guardarlo.
+function Conectar({ codigo }) {
+  const id = idDeTexto(codigo), [emp, setEmp] = useState(null), [err, setErr] = useState(''), otra = conexion.id && conexion.id !== id;
+  useEffect(() => {
+    if (conexion.fija || (id && conexion.id === id)) { location.hash = '#/'; return; }
+    if (!id) return setErr('El enlace está incompleto. Pide que te lo envíen de nuevo.');
+    api('publico', {}, { url: urlDeId(id) }).then(setEmp).catch((e) => setErr(e.cod === 'RED' ? e.message + ' Revisa tu conexión y vuelve a abrir el enlace.' : 'No se encontró una empresa con este enlace. Pide que te lo envíen de nuevo.'));
+  }, [id]); // eslint-disable-line
+  const aceptar = () => { conexion.poner(id); location.hash = '#/'; location.reload(); };
+  return <main className="acceso" id="contenido"><div className="acceso-caja pila">
+    <h1>Conectar este celular</h1>
+    {err ? <Aviso tono="peligro">{err}</Aviso> : !emp ? <div role="status"><span className="oculto-visual">Buscando la empresa…</span><Esqueleto lineas={3} /></div> : <>
+      <div className="logo" style={{ marginBottom: 0 }}><div className="sello">{emp.empresa.logo ? <img src={emp.empresa.logo} alt="" /> : <Clock size={28} aria-hidden="true" />}</div><div><strong style={{ fontFamily: 'var(--f-titulo)', fontSize: 'var(--t-5)' }}>{emp.empresa.nombre}</strong>{emp.empresa.nit && <div className="suave chico">NIT {emp.empresa.nit}</div>}</div></div>
+      <p className="suave">Vas a usar esta aplicación con la empresa de arriba. Continúa solo si es la empresa donde trabajas y el enlace te lo envió ella.</p>
+      {otra && <Aviso tono="aviso">Este celular ya estaba conectado con otra empresa. Al continuar se cierra esa sesión.</Aviso>}
+      <Boton onClick={aceptar}>Sí, es mi empresa</Boton></>}
+    <a className="btn texto" href="#/">Cancelar</a>
+  </div></main>;
 }
 
 function Reconsentir({ empresa, alListo }) {
@@ -48,27 +73,29 @@ function Reconsentir({ empresa, alListo }) {
 
 function Principal({ alSalir }) {
   const [yo, setYo] = useState(() => sesion.yo), [error, setError] = useState(null), [modoSel, setModo] = useState(null);
-  const avisos = useAvisos(), enLinea = useEnLinea();
+  const avisos = useAvisos(), enLinea = useEnLinea(), ultima = useRef(0);
   const cargar = useCallback(async () => {
-    try { const d = await api('yo', { base: location.origin + location.pathname }); sesion.yo = d; setYo(d); setError(null); aplicarMarca(d.cfg.empresa); return d; }
+    try { const d = await api('yo', { base: location.origin + location.pathname }); ultima.current = Date.now(); reloj.poner(d.ahora); sesion.yo = d; setYo(d); setError(null); aplicarMarca(d.cfg.empresa); return d; }
     catch (e) { if (e.cod !== 'SESION') setError(e); return null; }
   }, []);
-  useEffect(() => { cargar(); const alVolver = () => { if (document.visibilityState === 'visible') cargar(); }; document.addEventListener('visibilitychange', alVolver); window.addEventListener('online', cargar); return () => { document.removeEventListener('visibilitychange', alVolver); window.removeEventListener('online', cargar); }; }, [cargar]);
+  useEffect(() => { cargar(); const alVolver = () => { if (document.visibilityState === 'visible' && Date.now() - ultima.current > 60000) cargar(); }; /* no más de una consulta por minuto */ document.addEventListener('visibilitychange', alVolver); window.addEventListener('online', cargar); return () => { document.removeEventListener('visibilitychange', alVolver); window.removeEventListener('online', cargar); }; }, [cargar]);
   const actualizar = useCallback((parcial) => setYo((y) => { const n = { ...y, ...parcial }; sesion.yo = n; return n; }), []);
   const salir = async () => { try { await api('salir'); } catch { /* sin señal: se cierra localmente */ } sesion.cerrar(); alSalir(); };
 
   if (!yo) return <><Cabecera /><main className="contenido" id="contenido">{error ? <div className="pila"><Aviso tono="peligro">{error.message}</Aviso><Boton onClick={cargar}>Reintentar</Boton><Boton variante="texto" onClick={salir}>Cerrar sesión</Boton></div> : <div className="pila" role="status"><span className="oculto-visual">Cargando tu información…</span><div className="esqueleto" style={{ height: 260, borderRadius: 16 }} /><Esqueleto lineas={4} /></div>}</main></>;
   const u = yo.usuario, empresa = yo.cfg.empresa;
-  const modo = modoSel || (u.rol === 'admin' && window.innerWidth > 900 ? 'admin' : 'yo');
+  const modo = modoSel || (u.rol === 'admin' && window.innerWidth > 900 ? 'admin' : 'yo'), esJefe = u.rol === 'admin' || u.rol === 'supervisor';
+  const actualizarApp = () => { const ir = () => location.reload(); (navigator.serviceWorker?.getRegistration() || Promise.resolve()).then((r) => r?.update()).then(ir, ir); };
   if (u.consVersion !== yo.cfg.versionLegal) return <Reconsentir empresa={empresa} alListo={cargar} />;
   if (u.estado !== 'activo') return <><Cabecera empresa={empresa}><Boton variante="texto" chico icono={LogOut} onClick={salir}>Salir</Boton></Cabecera>
     <main className="acceso" id="contenido"><div className="acceso-caja pila"><h1>Tu registro está en revisión</h1><p className="suave">Hola {u.nombre.split(' ')[0]}. El administrador de {empresa.nombre} debe aprobar tu usuario antes de que puedas marcar. Cuando lo haga, toca “Revisar de nuevo”.</p><Boton onClick={() => cargar().then((d) => d && d.usuario.estado !== 'activo' && avisos.info('Aún no ha sido aprobado.'))}>Revisar de nuevo</Boton></div></main></>;
   return <div className="app">
     <Cabecera empresa={empresa}>
-      {u.rol === 'admin' && <Boton variante="texto" chico icono={modo === 'admin' ? UserRound : ShieldCheck} onClick={() => setModo(modo === 'admin' ? 'yo' : 'admin')}>{modo === 'admin' ? 'Mi jornada' : 'Administrar'}</Boton>}
+      {esJefe && <Boton variante="texto" chico icono={modo === 'admin' ? UserRound : ShieldCheck} onClick={() => setModo(modo === 'admin' ? 'yo' : 'admin')}>{modo === 'admin' ? 'Mi jornada' : u.rol === 'admin' ? 'Administrar' : 'Mi equipo'}</Boton>}
     </Cabecera>
     {!enLinea && <div className="banda no-imprimir" role="status"><WifiOff size={16} style={{ display: 'inline', verticalAlign: '-3px' }} aria-hidden="true" /> Sin conexión. Puedes marcar: se guardará en tu celular y se enviará al volver la señal.</div>}
-    {modo === 'admin' && u.rol === 'admin' ? <Admin yo={yo} recargarYo={cargar} alSalir={salir} /> : <Trabajador yo={yo} actualizar={actualizar} recargar={cargar} alSalir={salir} />}
+    {yo.version && yo.version !== VERSION && <div className="banda no-imprimir" role="status">Hay una versión nueva de la aplicación. <Boton chico variante="secundario" icono={RefreshCw} onClick={actualizarApp}>Actualizar</Boton></div>}
+    {modo === 'admin' && esJefe ? <Admin yo={yo} recargarYo={cargar} alSalir={salir} /> : <Trabajador yo={yo} actualizar={actualizar} recargar={cargar} alSalir={salir} />}
   </div>;
 }
 
@@ -78,6 +105,7 @@ export default function App() {
   useEffect(() => { aplicarMarca(publico?.empresa); if (!configurada()) return; api('publico').then((p) => { sesion.publico = p; setPublico(p); aplicarMarca(p.empresa); }).catch(() => {}); }, []); // eslint-disable-line
   let vista;
   if (r[0] === 'legal') vista = <Legal pagina={r[1]} empresa={publico?.empresa} />;
+  else if (r[0] === 'c') vista = <Conectar codigo={r[1]} />;
   else if (!configurada()) vista = <SinConfigurar />;
   else if (r[0] === 'firma') vista = <Firma codigo={r[1]} />;
   else if (!token) vista = <><Acceso publico={publico} alEntrar={(t, usuario) => { sesion.token = t; sesion.yo = null; setToken(t); }} /><PieLegal /></>;

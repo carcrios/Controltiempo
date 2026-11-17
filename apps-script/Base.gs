@@ -3,12 +3,14 @@
  * Base: acceso a datos, seguridad, configuración y enrutador de la API.
  * Una hoja de cálculo = una empresa. Nada de la empresa está escrito en el código: todo vive en la hoja Config.
  */
-var VERSION = '1.0.0';
+var VERSION = '1.2.0';
+// Página publicada (GitHub Pages) que usan tus clientes. Déjala escrita en la plantilla para que el instalador entregue el enlace listo.
+var APP_PREDETERMINADA = '';
 var _AHORA = null; // solo para pruebas
 
 var HOJAS = {
   Config: ['clave', 'valor'],
-  Usuarios: ['cedula', 'nombre', 'cargo', 'rol', 'centroId', 'salario', 'salarioOk', 'tipoPago', 'email', 'telefono', 'ingreso', 'eps', 'arl', 'estado', 'hash', 'salt', 'codigo', 'consVersion', 'consFecha', 'creado'],
+  Usuarios: ['cedula', 'nombre', 'cargo', 'rol', 'centroId', 'salario', 'salarioOk', 'tipoPago', 'email', 'telefono', 'ingreso', 'eps', 'arl', 'estado', 'hash', 'salt', 'codigo', 'consVersion', 'consFecha', 'creado', 'supCentros', 'banco', 'tipoCuenta', 'cuenta', 'retiro'],
   Sesiones: ['hash', 'cedula', 'creado', 'expira', 'equipo'],
   Centros: ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo'],
   Jefes: ['id', 'nombre', 'cargo', 'email', 'whatsapp', 'pin', 'centros', 'activo'],
@@ -18,6 +20,9 @@ var HOJAS = {
   Extras: ['id', 'cedula', 'fecha', 'minCalc', 'minAprob', 'estado', 'decididoPor', 'decididoEl', 'obs'],
   Nomina: ['id', 'desde', 'hasta', 'cedula', 'nombre', 'neto', 'detalle', 'generado'],
   Periodos: ['desde', 'hasta', 'cerradoPor', 'cerradoEl'],
+  Novedades: ['id', 'cedula', 'fecha', 'concepto', 'valor', 'salarial', 'nota', 'creadoPor', 'creado'],
+  Turnos: ['id', 'nombre', 'e', 's', 'ai', 'af', 'dias', 'activo'],
+  Programacion: ['id', 'cedula', 'desde', 'hasta', 'turnoId', 'creadoPor', 'creado'],
   Alertas: ['fecha', 'tipo', 'cedula', 'detalle', 'enviadoA', 'estado'],
   Auditoria: ['fecha', 'actor', 'accion', 'detalle'],
   Errores: ['fecha', 'cedula', 'origen', 'mensaje', 'detalle', 'equipo', 'version']
@@ -28,13 +33,14 @@ var TIPOS_ALERTA = {
   marcacion_manual: 'Marcación con hora digitada', bloqueo_permisos: 'Bloqueó la ubicación o la cámara', sin_foto: 'Marcación sin la foto exigida',
   incompleto: 'Jornada sin salida', permiso_nuevo: 'Nueva solicitud de permiso', permiso_vencido: 'Permiso sin respuesta a tiempo',
   permiso_resuelto: 'Permiso aprobado o rechazado', extras_tope: 'Horas extra por encima del tope legal', extras_pendientes: 'Horas extra por aprobar',
-  registro_nuevo: 'Nuevo usuario por aprobar', respaldo: 'Resultado de la copia de seguridad', error_sistema: 'Error del sistema'
+  fatiga: 'Jornada continua cerca del máximo (fatiga)', seguridad: 'Intentos de acceso sospechosos', registro_nuevo: 'Nuevo usuario por aprobar', respaldo: 'Resultado de la copia de seguridad', error_sistema: 'Error del sistema'
 };
 
 var CFG_DEF = {
   empresa: { nombre: 'Mi empresa', nit: '', direccion: '', telefono: '', logo: '', color: '', correoDatos: '', responsableDatos: '', titularSoftware: '' },
   urlApp: '', zona: 'America/Bogota', periodoNomina: 'quincenal',
   fotoProbabilidad: 30, geocercaEstricta: false, radioDefecto: 150, toleranciaMin: 5, recordatorioMin: 5, recordatorioCorreo: false,
+  factorPrestacional: 0, fatigaHorasMax: 10, fatigaAvisoMin: 30, codigosConcepto: {},
   minutosAusencia: 60, diasAtrasManual: 3, horasLimitePermiso: 24, aprobacionFinalAdmin: true,
   autoRegistro: true, codigoEmpresa: '', sesionDias: 90,
   correoAlertas: '', alertas: {},
@@ -72,6 +78,11 @@ function distancia_(a, b, c, d) {
   var R = 6371000, r = Math.PI / 180, x = (c - a) * r, y = (d - b) * r, q = Math.sin(x / 2) * Math.sin(x / 2) + Math.cos(a * r) * Math.cos(c * r) * Math.sin(y / 2) * Math.sin(y / 2);
   return Math.round(2 * R * Math.atan2(Math.sqrt(q), Math.sqrt(1 - q)));
 }
+// Contador de FALLOS (no de intentos): bloquea adivinar claves aunque el atacante cambie de cédula o de permiso.
+function fallo_(clave, seg) { var c = CacheService.getScriptCache(), k = 'fl:' + clave, n = +(c.get(k) || 0) + 1; c.put(k, String(n), seg); return n; }
+function bloqueado_(clave, max) { if (+(CacheService.getScriptCache().get('fl:' + clave) || 0) >= max) throw E_('DEMASIADOS', 'Demasiados intentos fallidos. Espera un rato e intenta de nuevo.'); }
+function claveDebil_(clave, cedula) { clave = String(clave || ''); return clave.length < 6 || clave === cedula || /^(\d)\1+$/.test(clave) || ['123456', '1234567', '12345678', '123456789', '654321', 'abcdef', 'qwerty', 'password', 'colombia', 'abc123', '111222', '123123'].indexOf(clave.toLowerCase()) >= 0; }
+function codigoLargo_() { var a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', s = azar_(), r = ''; for (var i = 0; i < 8; i++) r += a.charAt(parseInt(s.substr(i * 2, 2), 16) % a.length); return r; }
 function limite_(clave, max, seg) {
   var c = CacheService.getScriptCache(), k = 'rl:' + clave, n = +(c.get(k) || 0);
   if (n >= max) throw E_('DEMASIADOS', 'Demasiados intentos. Espera unos minutos y vuelve a intentar.');
@@ -93,7 +104,7 @@ function celda_(v) {
   if (v === undefined || v === null) return '';
   if (typeof v === 'object') v = JSON.stringify(v);
   v = String(v); if (v.length > 49000) v = v.substr(0, 49000);
-  return /^[=+\-@]/.test(v) ? "'" + v : v; // evita inyección de fórmulas
+  return v === '' ? '' : "'" + v; // el apóstrofo obliga a Sheets a guardar texto literal: ni fechas, ni números, ni fórmulas
 }
 function leer(n, cola) {
   var k = n + '|' + (cola || ''); if (_c[k]) return _c[k];
@@ -181,7 +192,7 @@ function cerrarSesiones_(cedula, soloHash) {
 }
 function usuarioPublico_(u) {
   return { cedula: u.cedula, nombre: u.nombre, cargo: u.cargo, rol: u.rol, centroId: u.centroId, salario: +u.salario || 0, salarioOk: u.salarioOk === '1', tipoPago: u.tipoPago || 'mensual',
-    email: u.email, telefono: u.telefono, ingreso: u.ingreso, eps: u.eps, arl: u.arl, estado: u.estado, consVersion: u.consVersion, tieneClave: !!u.hash };
+    email: u.email, telefono: u.telefono, ingreso: String(u.ingreso).substr(0, 10), eps: u.eps, arl: u.arl, estado: u.estado, retiro: String(u.retiro || '').substr(0, 10), supCentros: json_(u.supCentros, []), banco: u.banco || '', tipoCuenta: u.tipoCuenta || '', cuenta: u.cuenta || '', consVersion: String(u.consVersion).indexOf(cfg_().versionLegal) === 0 ? cfg_().versionLegal : u.consVersion, tieneClave: !!u.hash };
 }
 
 /* ---------- Enrutador ---------- */
@@ -199,6 +210,7 @@ function despachar_(req) {
     var u = null;
     if (a.rol !== 'publico') {
       u = usuarioDeToken_(req.t);
+      if (a.rol === 'supervisor' && (['admin', 'supervisor'].indexOf(u.rol) < 0 || u.estado !== 'activo')) throw E_('PERMISO', 'Esta acción es solo para supervisores y administradores.');
       if (a.rol === 'admin' && (u.rol !== 'admin' || u.estado !== 'activo')) throw E_('PERMISO', 'Esta acción es solo para administradores.');
     }
     return { ok: true, d: a.fn(req.d || {}, u, req) };
@@ -213,4 +225,18 @@ function doPost(e) {
   }
   return ContentService.createTextOutput(JSON.stringify(out)).setMimeType(ContentService.MimeType.JSON);
 }
-function doGet() { return ContentService.createTextOutput(JSON.stringify({ ok: true, servicio: 'control-jornada', version: VERSION })).setMimeType(ContentService.MimeType.JSON); }
+function html_(t) { return String(t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+// Al abrir la dirección /exec en el navegador: termina la instalación si faltaba y entrega el enlace de conexión.
+function doGet() {
+  _c = {}; _cfg = null;
+  var estado = 'Servicio activo.', instalado = !!prop_('SECRETO') && prop_('SS_ID') === SpreadsheetApp.getActiveSpreadsheet().getId();
+  if (!instalado) { try { instalar(); instalado = true; estado = 'Instalación completada.'; } catch (e) { estado = 'No se pudo instalar: ' + e.message + '. Abre la hoja de cálculo y usa el menú Control de jornada → Instalar o reparar.'; } }
+  var hayAdmin = false, e0 = enlaceEmpresa_(), enlace = e0.enlace, id = e0.id, url = e0.url;
+  try { hayAdmin = leer('Usuarios').some(function (u) { return u.rol === 'admin' && u.hash; }); } catch (e) { }
+  var h = '<div style="font-family:system-ui,sans-serif;max-width:560px;margin:32px auto;padding:0 16px;line-height:1.5;color:#14242A">' +
+    '<h1 style="font-size:22px">Control de jornada · versión ' + VERSION + '</h1><p>' + html_(estado) + '</p>' +
+    (enlace ? '<p><strong>Enlace de tu empresa</strong> (ábrelo y compártelo con tu personal):</p><p><a href="' + html_(enlace) + '" target="_blank" style="word-break:break-all">' + html_(enlace) + '</a></p>'
+      : '<p><strong>Código de conexión</strong> (pégalo en la página de la aplicación):</p><p style="word-break:break-all;background:#E8EDEC;padding:12px;border-radius:8px;font-family:monospace">' + html_(id || url) + '</p>') +
+    (hayAdmin ? '' : '<p>Primer ingreso: el <strong>código del primer administrador</strong> está en la hoja de cálculo, menú <em>Control de jornada → Ver código del primer administrador</em>. Por seguridad no se muestra aquí.</p>') + '</div>';
+  return HtmlService.createHtmlOutput(h).setTitle('Control de jornada');
+}

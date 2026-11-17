@@ -27,6 +27,8 @@ var Motor = (function () {
     pctIncapGeneral: 0.6667,
     pctIncapLaboral: 1,
     contarAntesDeEntrada: false,// llegar antes del horario no suma tiempo (hasta 2 h antes); true = sí cuenta
+    maxOrdinariaDiaH: 9,        // jornada flexible: hasta 9 h diarias sin recargo (CST art. 161); lo que pase es extra
+    descontarDominical: false,  // CST art. 173: la ausencia injustificada hace perder el dominical (facultad del empleador)
     festivosExtra: []
   };
 
@@ -106,7 +108,8 @@ var Motor = (function () {
       else if (ea !== null) { if (ea < ent) ea += 1440; a = ea - (b - a); b = ea; }
       if (Math.min(b, sal) > Math.max(a, ent)) { corte = [Math.max(a, ent), Math.min(b, sal)]; r.almuerzoAsumido = true; }
     }
-    var jor = h ? jornadaMin(h) : cfg.jornadaDiaSinHorarioH * 60; r.jornadaMin = h ? jor : 0;
+    var jor = h ? Math.min(jornadaMin(h), cfg.maxOrdinariaDiaH * 60) : cfg.jornadaDiaSinHorarioH * 60; r.jornadaMin = h ? jor : 0;
+    if (!h && dia.libre && !esDescanso(dia.fecha, cfg)) jor = 0; // día no programado (p. ej. sábado): todo es trabajo suplementario
     if (h) {
       var tol = +(h.tol || 0), he = aMin(h.e), hs = aMin(h.s); if (hs <= he) hs += 1440;
       if (ent > he + tol) r.tardanzaMin = ent - he;
@@ -181,7 +184,7 @@ var Motor = (function () {
    */
   function liquidarPeriodo(p, cfgIn) {
     var cfg = cfgDe(cfgIn), u = p.usuario, sal = +u.salario || 0, porDia = u.tipoPago === 'dia';
-    var corte = p.corte && p.corte < p.hasta ? p.corte : p.hasta;
+    var corte = p.corte && p.corte < p.hasta ? p.corte : p.hasta; if (p.retiro && p.retiro < corte) corte = p.retiro;
     var desde = p.ingreso && p.ingreso > p.desde ? p.ingreso : p.desde;
     var vDia = porDia ? sal : sal / 30, vHora = porDia ? sal * 30 / cfg.divisorMensual : sal / cfg.divisorMensual;
     var liq = liquidarDias(p.dias, cfg, p.extras), porFecha = {};
@@ -195,7 +198,7 @@ var Motor = (function () {
       if (r.trabajadoMin > 0) diasTrab++;
       ['trabajadoMin', 'ordDiu', 'ordNoc', 'domDiu', 'domNoc', 'extDiu', 'extNoc', 'extDomDiu', 'extDomNoc', 'extraSinAprobarMin', 'tardanzaMin'].forEach(function (k) { t[k] += r[k] || 0; });
       if (r.tardanzaMin) t.tardanzas++;
-      var rd = recDominical(f, cfg), base = cfg.dominicalPagaHoraBase ? 1 : 0, vm = vHora / 60;
+      var rd = recDominical(f, cfg), base = cfg.dominicalPagaHoraBase && !(r.jornadaMin > 0) && !porDia ? 1 : 0, vm = vHora / 60; // domingo habitual (está en el horario) o pago por día: solo el recargo
       valores.recNoc += r.ordNoc * vm * cfg.recargoNocturno;
       valores.dom += r.domDiu * vm * (base + rd);
       valores.domNoc += r.domNoc * vm * (base + rd + cfg.recargoNocturno);
@@ -206,12 +209,15 @@ var Motor = (function () {
     });
     var aus = 0, diasIncGen = 0, diasIncOtra = 0, diasVac = 0, diasPermNoRem = 0, horasPermNoRem = 0, f = desde, ausentes = [];
     var perms = p.permisos || [], incs = p.incapacidades || [];
+    var diasIncLarga = 0, diasLic = 0, faltaSem = {}, descansos = 0;
     while (f <= corte) {
-      var inc = cubre(incs, f), per = cubre(perms, f), r2 = liq[f], trabajo = r2 && (r2.trabajadoMin > 0 || r2.incompleto);
-      if (inc) { if (inc.tipo === 'general') diasIncGen++; else diasIncOtra++; }
-      else if (per && per.tipo === 'vacaciones') diasVac++;
-      else if (per && !per.horas) { if (!per.remunerado && !trabajo) diasPermNoRem++; }
-      else if (!trabajo && !per && horarioDia(p.horario, f, cfg, p.trabajaFestivos) && !porDia) { aus++; ausentes.push(f); }
+      var inc = cubre(incs, f), per = cubre(perms, f), r2 = liq[f], trabajo = r2 && (r2.trabajadoMin > 0 || r2.incompleto), es31 = +f.substr(8, 2) === 31;
+      var prog = p.programado && p.programado[f] !== undefined ? p.programado[f] : !!horarioDia(p.horario, f, cfg, p.trabajaFestivos);
+      if (inc) { if (!es31) { if (inc.tipo === 'general') { if (diasEntre(inc.desde, f) >= 90) diasIncLarga++; else diasIncGen++; } else diasIncOtra++; } }
+      else if (per && per.tipo === 'vacaciones') { if (!es31) diasVac++; }
+      else if (per && !per.horas) { if (!trabajo && !es31) { if (per.remunerado) diasLic++; else diasPermNoRem++; } }
+      else if (!trabajo && prog) { faltaSem[lunesDe(f)] = 1; if (!porDia && !es31) { aus++; ausentes.push(f); } }
+      else if (!trabajo && esDescanso(f, cfg)) descansos++;
       f = sumar(f, 1);
     }
     perms.forEach(function (x) { if (x.horas && !x.remunerado && x.desde >= desde && x.desde <= corte) horasPermNoRem += +x.horas; });
@@ -219,17 +225,23 @@ var Motor = (function () {
     var dn = diasNomina(desde, corte), c = [];
     function add(cod, concepto, cant, valor) { valor = (valor < 0 ? -1 : 1) * Math.round(Math.abs(valor)); if (valor) c.push({ cod: cod, concepto: concepto, cantidad: cant, valor: valor }); }
     var h = function (m) { return Math.round(m / 6) / 10; };
-    if (porDia) add('SAL', 'Días trabajados', diasTrab, diasTrab * vDia);
-    else {
-      var dSal = Math.max(0, dn - diasIncGen - diasIncOtra - diasVac), piso = cfg.smmlv / 30;
+    var piso = cfg.smmlv / 30, semFalta = Object.keys(faltaSem).filter(function (l) { var dm = sumar(l, 6); return dm >= desde && dm <= corte; }).length;
+    if (porDia) {
+      add('SAL', 'Días trabajados', diasTrab, diasTrab * vDia);
+      var dr = Math.max(0, descansos - semFalta); // CST arts. 173 y 177: el jornalero gana el descanso si no faltó sin justificación esa semana
+      add('DR', 'Descanso dominical y festivo remunerado', dr, dr * vDia);
+    } else {
+      var dSal = Math.max(0, dn - diasIncGen - diasIncLarga - diasIncOtra - diasVac);
       add('SAL', 'Salario básico', dSal, dSal * vDia);
-      add('VAC', 'Vacaciones disfrutadas', diasVac, diasVac * vDia);
-      add('ING', 'Incapacidad enfermedad general', diasIncGen, diasIncGen * Math.max(vDia * cfg.pctIncapGeneral, Math.min(piso, vDia)));
-      add('INL', 'Incapacidad laboral / licencia', diasIncOtra, diasIncOtra * vDia * cfg.pctIncapLaboral);
       add('AUS', 'Ausencias sin justificar', aus, -aus * vDia);
+      if (cfg.descontarDominical) add('DNC', 'Dominical no causado por ausencia', semFalta, -semFalta * vDia);
       add('PNR', 'Permisos no remunerados (días)', diasPermNoRem, -diasPermNoRem * vDia);
       add('PNH', 'Permisos no remunerados (horas)', horasPermNoRem, -horasPermNoRem * vHora);
     }
+    add('VAC', 'Vacaciones disfrutadas', diasVac, diasVac * vDia);
+    add('ING', 'Incapacidad enfermedad general', diasIncGen, diasIncGen * Math.max(vDia * cfg.pctIncapGeneral, Math.min(piso, vDia)));
+    add('IN5', 'Incapacidad general desde el día 91 (50 %)', diasIncLarga, diasIncLarga * Math.max(vDia * 0.5, Math.min(piso, vDia)));
+    add('INL', 'Incapacidad laboral / licencia', diasIncOtra, diasIncOtra * vDia * cfg.pctIncapLaboral);
     add('RN', 'Recargo nocturno', h(t.ordNoc), valores.recNoc);
     add('DF', 'Dominical / festivo diurno', h(t.domDiu), valores.dom);
     add('DFN', 'Dominical / festivo nocturno', h(t.domNoc), valores.domNoc);
@@ -237,13 +249,20 @@ var Motor = (function () {
     add('HEN', 'Hora extra nocturna', h(t.extNoc), valores.extNoc);
     add('HEDF', 'Hora extra diurna dominical / festiva', h(t.extDomDiu), valores.extDomDiu);
     add('HENF', 'Hora extra nocturna dominical / festiva', h(t.extDomNoc), valores.extDomNoc);
+    var novs = (p.novedades || []).filter(function (n) { return n.fecha >= p.desde && n.fecha <= corte && +n.valor; });
+    novs.forEach(function (n) { if (n.salarial && n.valor > 0) add('BON', n.concepto, 1, n.valor); });
     var ibc = c.reduce(function (s, x) { return s + x.valor; }, 0);
-    var mensual = porDia ? sal * 30 : sal, diasAux = porDia ? diasTrab : Math.max(0, dn - aus - diasIncGen - diasIncOtra - diasVac - diasPermNoRem);
+    var mensual = porDia ? sal * 30 : sal, diasAux = porDia ? diasTrab : Math.max(0, dn - aus - diasIncGen - diasIncLarga - diasIncOtra - diasVac - diasPermNoRem - diasLic);
     if (mensual <= cfg.smmlv * cfg.topeAuxSmmlv) add('AUX', 'Auxilio de transporte', diasAux, diasAux * cfg.auxTransporte / 30);
+    novs.forEach(function (n) { if (!n.salarial && n.valor > 0) add('BNS', n.concepto, 1, n.valor); });
     var devengado = c.reduce(function (s, x) { return s + x.valor; }, 0), d = [];
-    function ded(cod, concepto, pct) { var v = Math.round(Math.max(0, ibc) * pct); if (v) d.push({ cod: cod, concepto: concepto, cantidad: Math.round(pct * 1000) / 10 + ' %', valor: v }); }
+    var ibcBase = Math.min(Math.max(0, ibc), cfg.smmlv * 25 * dn / 30); // tope de cotización: 25 SMMLV
+    function ded(cod, concepto, pct) { var v = Math.round(ibcBase * pct); if (v) d.push({ cod: cod, concepto: concepto, cantidad: Math.round(pct * 10000) / 100 + ' %', valor: v }); }
     ded('SLD', 'Aporte a salud', cfg.pctSalud); ded('PEN', 'Aporte a pensión', cfg.pctPension);
-    if (mensual >= cfg.smmlv * 4) ded('FSP', 'Fondo de solidaridad pensional', cfg.pctSolidaridad);
+    // Fondo de solidaridad pensional sobre el IBC llevado a mes (Ley 100 art. 27): 1 % desde 4 SMMLV y adicional de 0,2 a 1 % desde 16 SMMLV
+    var sm = dn ? ibc * 30 / dn / cfg.smmlv : 0, adic = sm < 16 ? 0 : sm < 17 ? 0.002 : sm < 18 ? 0.004 : sm < 19 ? 0.006 : sm <= 20 ? 0.008 : 0.01;
+    if (sm >= 4) ded('FSP', 'Fondo de solidaridad pensional', cfg.pctSolidaridad + adic);
+    novs.forEach(function (n) { if (n.valor < 0) d.push({ cod: 'DES', concepto: n.concepto, cantidad: 1, valor: Math.round(-n.valor) }); });
     var deducciones = d.reduce(function (s, x) { return s + x.valor; }, 0);
     return { desde: p.desde, hasta: p.hasta, corte: corte, diasNomina: dn, diasTrabajados: diasTrab, valorHora: Math.round(vHora),
       horas: { trabajadas: h(t.trabajadoMin), nocturnas: h(t.ordNoc + t.domNoc), dominicales: h(t.domDiu + t.domNoc), extras: h(t.extDiu + t.extNoc + t.extDomDiu + t.extDomNoc), extrasSinAprobar: h(t.extraSinAprobarMin) },
@@ -271,8 +290,8 @@ var Motor = (function () {
     { id: 'cargo_oficial', cat: 'ley', nombre: 'Cargo oficial de forzosa aceptación', norma: 'CST art. 57 num. 6', rem: true },
     { id: 'sindical', cat: 'ley', nombre: 'Comisión sindical', norma: 'CST art. 57 num. 6', rem: true },
     { id: 'entierro', cat: 'ley', nombre: 'Entierro de un compañero', norma: 'CST art. 57 num. 6', rem: true },
-    { id: 'familia', cat: 'ley', nombre: 'Jornada de la familia', norma: 'Ley 1857 de 2017', rem: true },
-    { id: 'bicicleta', cat: 'ley', nombre: 'Día por uso de bicicleta', norma: 'Ley 1811 de 2016 · Ley 2466 de 2025', rem: true },
+    { id: 'familia', cat: 'acuerdo', nombre: 'Jornada de la familia', norma: 'Ley 1857 de 2017 (no obligatoria con jornada de 42 h: Ley 2101 de 2021)', rem: true },
+    { id: 'bicicleta', cat: 'acuerdo', nombre: 'Día por uso de bicicleta', norma: 'Ley 1811 de 2016 · Ley 2466 de 2025 (según lo adopte la empresa)', rem: true },
     { id: 'calamidad', cat: 'calamidad', nombre: 'Calamidad doméstica', norma: 'CST art. 57 num. 6 · Sentencia C-930 de 2009', rem: true },
     { id: 'vacaciones', cat: 'vacaciones', nombre: 'Vacaciones', norma: 'CST art. 186', rem: true },
     { id: 'acuerdo_rem', cat: 'acuerdo', nombre: 'Permiso remunerado por acuerdo', norma: 'Acuerdo con el empleador', rem: true },

@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlarmClock, BellRing, Building2, CalendarCheck, ClipboardList, Download, FileSpreadsheet, HeartPulse, Image, LayoutDashboard, LogOut, MapPin, Pencil, Plus, RefreshCw, Settings, Stethoscope, Timer, Upload, Users, Wallet, KeyRound, LocateFixed } from 'lucide-react';
-import { api } from './api.js';
+import { AlarmClock, BellRing, Building2, CalendarCheck, ClipboardList, Download, FileSpreadsheet, HeartPulse, Image, LayoutDashboard, LogOut, MapPin, Pencil, Plus, RefreshCw, Settings, Stethoscope, Timer, Upload, Users, Wallet, KeyRound, LocateFixed, CalendarClock, BarChart3, Copy, MessageCircle } from 'lucide-react';
+import { api, conexion } from './api.js';
 import { Aviso, Boton, Campo, Casilla, Confirmar, Estado, Hoja, Insignia, Tabla, Tarjeta, Vacio, useAvisos, useCarga, useForm } from './ui.jsx';
 import { NOMBRE_TIPO, TIPOS, fechaCorta, fechaHora, horas, hoyISO, pesos, sumarDias, ubicar } from './util.js';
-import { Permisos, Extras, Incapacidades, Nomina, Obras, Alertas, Config, Sistema } from './Admin2.jsx';
+import Informes from './Informes.jsx';
+import { Permisos, Extras, Incapacidades, Nomina, Obras, Alertas, Config, Sistema, Turnos } from './Admin2.jsx';
 
 export const periodoActual = (tipo) => { const h = hoyISO(), ym = h.slice(0, 8), d = +h.slice(8), fin = new Date(+h.slice(0, 4), +h.slice(5, 7), 0).getDate();
   return tipo === 'mensual' ? { desde: ym + '01', hasta: ym + fin } : d <= 15 ? { desde: ym + '01', hasta: ym + '15' } : { desde: ym + '16', hasta: ym + fin }; };
@@ -27,11 +28,17 @@ export const Titulo = ({ t, children, accion }) => <div className="titulo-pagina
 const EST = { presente: ['Trabajando', 'ok'], almuerzo: ['En almuerzo', 'info'], salio: ['Ya salió', ''], ausente: ['No se presentó', 'peligro'], por_llegar: ['Por llegar', ''], permiso: ['En permiso', 'info'], incapacidad: ['Incapacidad', 'info'], descanso: ['Descanso', ''] };
 function Tablero({ ir }) {
   const carga = useCarga(() => api('adminTablero'), []), [filtro, setFiltro] = useState('');
-  useEffect(() => { const i = setInterval(() => carga.recargar(true), 120000); return () => clearInterval(i); }, []); // eslint-disable-line
+  useEffect(() => { const i = setInterval(() => { if (document.visibilityState === 'visible') carga.recargar(true); }, 120000); return () => clearInterval(i); }, []); // eslint-disable-line
   return <><Titulo t="Hoy en la empresa" accion={<Boton variante="secundario" icono={RefreshCw} cargando={carga.cargando} onClick={() => carga.recargar()}>Actualizar</Boton>}>Quién está, quién falta y qué espera tu decisión.</Titulo>
-    <Estado carga={carga} lineas={8}>{(d) => { const c = d.cuenta, p = d.pendientes, pend = [['permisos', p.permisos, 'permiso(s) por aprobar', 'permisos'], ['extras', p.extras, 'registro(s) de horas extra por aprobar', 'extras'], ['revisar', p.revisar, 'marcación(es) digitadas por revisar', 'marcaciones'], ['usuarios', p.usuarios, 'usuario(s) nuevos por aprobar', 'personal'], ['salarios', p.salarios, 'salario(s) sin validar', 'personal']].filter((x) => x[1] > 0);
+    <Estado carga={carga} lineas={8}>{(d) => { const c = d.cuenta, p = d.pendientes, pend = [['permisos', p.permisos, 'permiso(s) por aprobar', 'permisos'], ['extras', p.extras, 'registro(s) de horas extra por aprobar', 'extras'], ['revisar', p.revisar, 'marcación(es) digitadas o tardías por revisar', 'marcaciones'], ['usuarios', p.usuarios, 'usuario(s) nuevos por aprobar', 'personal'], ['salarios', p.salarios, 'salario(s) sin validar', 'personal']].filter((x) => x[1] > 0);
       return <div className="pila amplia">
         <p className="suave">{new Date(d.fecha + 'T12:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })} · {d.hora}{d.festivo ? ' · festivo' : ''}</p>
+        {d.pasos && !Object.values(d.pasos).every(Boolean) && <Tarjeta titulo="Primeros pasos" accion={<span className="suave chico">{Object.values(d.pasos).filter(Boolean).length} de 6</span>}>
+          <p className="suave chico" style={{ marginBottom: 8 }}>Completa esto una vez y la aplicación queda lista para tu personal.</p>
+          <ol className="lista tocable" style={{ paddingLeft: 0 }}>{[['empresa', 'Pon el nombre, NIT y logo de la empresa', 'config'], ['centros', 'Crea las obras o sedes con su horario y ubicación', 'centros'], ['alertas', 'Escribe el correo que recibe las alertas', 'alertas'],
+            ['jefes', 'Agrega los jefes que firman los permisos', 'config'], ['personal', 'Carga el personal (uno a uno o desde Excel)', 'personal'], ['activos', 'Comparte el enlace: al menos una persona activó su cuenta', 'personal']].map(([k, t, v], i) =>
+            <li key={k}><button onClick={() => ir(v)}><span className="insignia" style={d.pasos[k] ? { background: 'var(--c-ok-suave)', color: 'var(--c-ok)' } : undefined} aria-hidden="true">{d.pasos[k] ? '✓' : i + 1}</span><span className="crece" style={d.pasos[k] ? { textDecoration: 'line-through', color: 'var(--c-texto-2)' } : undefined}>{t}<span className="oculto-visual">{d.pasos[k] ? ' (hecho)' : ' (pendiente)'}</span></span>{!d.pasos[k] && <span className="suave chico">Ir</span>}</button></li>)}</ol>
+        </Tarjeta>}
         <div className="indicadores" role="group" aria-label="Filtrar personal por estado">
           {[['presente', c.presente + c.almuerzo, 'Trabajando', 'ok'], ['ausente', c.ausente, 'No se presentaron', 'peligro'], ['tarde', c.tarde, 'Llegaron tarde', 'aviso'], ['por_llegar', c.por_llegar, 'Por llegar', ''], ['salio', c.salio, 'Ya salieron', ''], ['novedad', c.permiso + c.incapacidad, 'Permiso o incapacidad', 'info']].map(([k, v, t, tono]) =>
             <button key={k} className={`indicador n-${tono}`} aria-pressed={filtro === k} onClick={() => setFiltro(filtro === k ? '' : k)} style={filtro === k ? { background: 'var(--c-primario-suave)' } : undefined}><span className="valor">{v}</span><span className="rotulo">{t}</span></button>)}
@@ -61,8 +68,10 @@ function Personal({ centros }) {
     const r = await correr(() => api('adminPersonaImportar', { filas: l }, { espera: 120000 })); if (r) { setImp({ res: r }); carga.recargar(true); }
   };
   return <><Titulo t="Personal" accion={<><label className="btn secundario"><Upload size={20} aria-hidden="true" />Importar Excel<input type="file" accept=".xlsx,.xls,.csv" className="oculto-visual" onChange={importar} /></label><Boton icono={Plus} onClick={() => setEdit({})}>Agregar persona</Boton></>}>Cada persona activa su cuenta con su cédula y un código de un solo uso que entregas tú.</Titulo>
+    <Tarjeta className="hundida" style={{ marginBottom: 16 }}><div className="fila entre"><div className="crece" style={{ minWidth: 220 }}><strong>Enlace para tu personal</strong><div className="suave chico" style={{ wordBreak: 'break-all' }}>{conexion.enlace()}</div><div className="suave chico">Cada persona lo abre en su celular, entra con su cédula y su código de activación, y luego instala la aplicación.</div></div>
+      <div className="fila"><Boton chico variante="secundario" icono={Copy} onClick={() => navigator.clipboard?.writeText(conexion.enlace())}>Copiar</Boton><a className="btn secundario chico" href={`https://wa.me/?text=${encodeURIComponent('Control de jornada. Abre este enlace en tu celular para registrar tu entrada y salida: ' + conexion.enlace())}`} target="_blank" rel="noreferrer"><MessageCircle size={16} aria-hidden="true" />WhatsApp</a></div></div></Tarjeta>
     <Estado carga={carga} lineas={8}>{(l) => <Tabla columnas={[
-      { k: 'nombre', t: 'Nombre', render: (u) => <><strong>{u.nombre}</strong><div className="suave chico">C.C. {u.cedula}{u.rol === 'admin' ? ' · administrador' : ''}</div></>, texto: (u) => u.nombre + ' ' + u.cedula },
+      { k: 'nombre', t: 'Nombre', render: (u) => <><strong>{u.nombre}</strong><div className="suave chico">C.C. {u.cedula}{u.rol === 'admin' ? ' · administrador' : u.rol === 'supervisor' ? ' · supervisor' : ''}</div></>, texto: (u) => u.nombre + ' ' + u.cedula },
       { k: 'cargo', t: 'Cargo' }, { k: 'centroId', t: 'Centro', render: (u) => nombreCentro(u.centroId), texto: (u) => nombreCentro(u.centroId) },
       { k: 'salario', t: 'Salario', num: true, render: (u) => <>{pesos(u.salario)}{!u.salarioOk && u.salario > 0 && <div><Insignia tono="aviso">sin validar</Insignia></div>}</> },
       { k: 'estado', t: 'Estado', render: (u) => <Insignia tono={ESTADO_U[u.estado]?.[1]}>{ESTADO_U[u.estado]?.[0] || u.estado}</Insignia>, texto: (u) => ESTADO_U[u.estado]?.[0] },
@@ -83,7 +92,7 @@ function Personal({ centros }) {
 }
 function FormPersona({ persona, centros, alCerrar, alGuardar }) {
   const nueva = persona && !persona.cedula, [f, campo, setF] = useForm({}), [correr, ocupado] = useAccion();
-  useEffect(() => { if (persona) setF({ cedula: '', nombre: '', cargo: '', rol: 'trabajador', centroId: centros[0]?.id || '', salario: '', tipoPago: 'mensual', email: '', telefono: '', ingreso: '', eps: '', arl: '', ...persona }); }, [persona]); // eslint-disable-line
+  useEffect(() => { if (persona) setF({ cedula: '', nombre: '', cargo: '', rol: 'trabajador', centroId: centros[0]?.id || '', salario: '', tipoPago: 'mensual', email: '', telefono: '', ingreso: '', eps: '', arl: '', supCentros: [], banco: '', tipoCuenta: '', cuenta: '', retiro: '', ...persona }); }, [persona]); // eslint-disable-line
   const guardar = async (extra) => { const r = await correr(() => api('adminPersonaGuardar', { ...f, salario: +String(f.salario).replace(/\D/g, ''), ...extra }), 'Persona guardada.'); if (r) alGuardar(r); };
   const nuevoCodigo = async () => { const r = await correr(() => api('adminPersonaCodigo', { cedula: f.cedula })); if (r) alGuardar({ codigo: r.codigo, usuario: f }); };
   return <Hoja abierta={!!persona} alCerrar={alCerrar} titulo={nueva ? 'Agregar persona' : 'Editar persona'}>
@@ -91,11 +100,14 @@ function FormPersona({ persona, centros, alCerrar, alGuardar }) {
     <div className="rejilla"><Campo etiqueta="Cédula" inputMode="numeric" disabled={!nueva} required {...campo('cedula')} /><Campo etiqueta="Nombre completo" required {...campo('nombre')} /></div>
     <div className="rejilla"><Campo etiqueta="Cargo" {...campo('cargo')} /><Campo como="select" etiqueta="Centro de trabajo" {...campo('centroId')}><option value="">Sin asignar</option>{centros.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</Campo></div>
     <div className="rejilla"><Campo etiqueta="Salario" inputMode="numeric" ayuda="Al guardar queda validado." {...campo('salario')} /><Campo como="select" etiqueta="Forma de pago" opciones={[{ v: 'mensual', t: 'Salario mensual' }, { v: 'dia', t: 'Valor por día trabajado' }]} {...campo('tipoPago')} /></div>
-    <div className="rejilla"><Campo etiqueta="Fecha de ingreso" type="date" ayuda="Para calcular vacaciones." {...campo('ingreso')} /><Campo como="select" etiqueta="Rol" opciones={[{ v: 'trabajador', t: 'Trabajador' }, { v: 'admin', t: 'Administrador' }]} {...campo('rol')} /></div>
+    <div className="rejilla"><Campo etiqueta="Fecha de ingreso" type="date" ayuda="Para calcular vacaciones." {...campo('ingreso')} /><Campo como="select" etiqueta="Rol" opciones={[{ v: 'trabajador', t: 'Trabajador' }, { v: 'supervisor', t: 'Supervisor de obra' }, { v: 'admin', t: 'Administrador' }]} {...campo('rol')} /></div>
+    {f.rol === 'supervisor' && <fieldset style={{ border: 0, padding: 0, margin: 0 }} className="pila junta"><legend className="etiqueta">Centros que supervisa</legend><span className="ayuda">Ve el tablero, las marcaciones y los permisos de esa gente, y aprueba sus horas extra. No ve salarios ni nómina. Sin marcar ninguno, supervisa su propio centro.</span>{centros.map((c) => <Casilla key={c.id} checked={(f.supCentros || []).includes(c.id)} onChange={(e) => setF((x) => ({ ...x, supCentros: e.target.checked ? [...(x.supCentros || []), c.id] : (x.supCentros || []).filter((y) => y !== c.id) }))}>{c.nombre}</Casilla>)}</fieldset>}
     <div className="rejilla"><Campo etiqueta="Correo" type="email" {...campo('email')} /><Campo etiqueta="Celular" inputMode="numeric" {...campo('telefono')} /></div>
     <div className="rejilla"><Campo etiqueta="EPS" {...campo('eps')} /><Campo etiqueta="ARL" {...campo('arl')} /></div>
+    <div className="rejilla"><Campo etiqueta="Banco" ayuda="Para el archivo plano de pagos." {...campo('banco')} /><Campo como="select" etiqueta="Tipo de cuenta" opciones={[{ v: '', t: '—' }, { v: 'ahorros', t: 'Ahorros' }, { v: 'corriente', t: 'Corriente' }]} {...campo('tipoCuenta')} /><Campo etiqueta="Número de cuenta" inputMode="numeric" {...campo('cuenta')} /></div>
+    {!nueva && persona?.estado !== 'pendiente' && <Campo etiqueta="Fecha de retiro" type="date" ayuda="Solo al dar de baja: desde el día siguiente deja de liquidarse. Vacía = hoy." {...campo('retiro')} />}
     {!nueva && <div className="fila"><Boton chico variante="secundario" icono={KeyRound} onClick={nuevoCodigo}>Nuevo código (restablece la contraseña)</Boton>
-      {persona?.estado === 'activo' && <Boton chico variante="texto" onClick={() => guardar({ estado: 'inactivo' })}>Dar de baja</Boton>}{persona?.estado === 'inactivo' && <Boton chico variante="texto" onClick={() => guardar({ estado: 'activo' })}>Reactivar</Boton>}</div>}
+      {persona?.estado === 'activo' && <Boton chico variante="texto" onClick={() => guardar({ estado: 'inactivo' })}>Dar de baja{f.retiro ? ` el ${fechaCorta(f.retiro)}` : ' hoy'}</Boton>}{persona?.estado === 'inactivo' && <Boton chico variante="texto" onClick={() => guardar({ estado: 'activo' })}>Reactivar</Boton>}</div>}
     <div className="acciones-hoja"><Boton variante="secundario" onClick={alCerrar}>Cancelar</Boton><Boton cargando={ocupado} onClick={() => guardar(persona?.estado === 'pendiente' ? { estado: 'activo' } : {})}>{persona?.estado === 'pendiente' ? 'Guardar y aprobar' : 'Guardar'}</Boton></div>
   </Hoja>;
 }
@@ -141,7 +153,7 @@ function FormCentro({ centro, alCerrar, alGuardar }) {
 }
 
 /* ---------- Marcaciones ---------- */
-function Marcaciones({ centros }) {
+function Marcaciones({ centros, soloVer }) {
   const [r, setR] = useState({ desde: sumarDias(hoyISO(), -6), hasta: hoyISO() }), [centroId, setCentroId] = useState(''), carga = useCarga(() => api('adminMarcaciones', { ...r, centroId }), [r.desde, r.hasta, centroId]);
   const [det, setDet] = useState(null), [foto, setFoto] = useState(null), [aj, setAj] = useState(null), [correr, ocupado] = useAccion();
   const verFoto = async (id) => { setFoto({ cargando: true }); const x = await correr(() => api('adminFoto', { id })); setFoto(x ? x : null); };
@@ -160,8 +172,8 @@ function Marcaciones({ centros }) {
       <ul className="lista">{TIPOS.map((t) => { const m = det.marcas.find((x) => x.tipo === t); return <li key={t} style={{ alignItems: 'flex-start' }}><div className="crece"><strong>{NOMBRE_TIPO[t]}</strong> <span className="num">{m ? m.hora.slice(11) : '—'}</span>
         {m && <div className="fila chico" style={{ gap: 4, marginTop: 4 }}><Insignia>{{ en_linea: 'en línea', sin_conexion: 'sin señal', manual: 'digitada', administrador: 'por administrador' }[m.origen] || m.origen}</Insignia>{m.estado === 'revisar' && <Insignia tono="peligro">por revisar</Insignia>}{m.enZona === '0' && <Insignia tono="peligro">a {m.dist} m del centro</Insignia>}{m.enZona === '1' && <Insignia tono="ok">en el centro</Insignia>}{m.fotoExigida && !m.foto && <Insignia tono="aviso">sin foto</Insignia>}</div>}
         {m?.motivo && <div className="suave chico">Motivo: {m.motivo}</div>}
-        {m && <div className="fila" style={{ marginTop: 6 }}>{m.lat && <a className="btn texto chico" href={`https://maps.google.com/?q=${m.lat},${m.lng}`} target="_blank" rel="noreferrer"><MapPin size={16} aria-hidden="true" />Mapa</a>}{m.foto && <Boton chico variante="texto" icono={Image} onClick={() => verFoto(m.foto)}>Foto</Boton>}{m.estado === 'revisar' && <Boton chico variante="texto" onClick={() => revisada(m.id)}>Dar por revisada</Boton>}</div>}</div>
-        {!det.cerrado && <Boton chico variante="secundario" icono={Pencil} onClick={() => setAj({ cedula: det.cedula, fecha: det.fecha, tipo: t, hora: m ? m.hora.slice(11) : '', motivo: '', existe: !!m })}>{m ? 'Corregir' : 'Agregar'}</Boton>}</li>; })}</ul>
+        {m && <div className="fila" style={{ marginTop: 6 }}>{m.lat && <a className="btn texto chico" href={`https://maps.google.com/?q=${m.lat},${m.lng}`} target="_blank" rel="noreferrer"><MapPin size={16} aria-hidden="true" />Mapa</a>}{m.foto && <Boton chico variante="texto" icono={Image} onClick={() => verFoto(m.foto)}>Foto</Boton>}{m.estado === 'revisar' && !soloVer && <Boton chico variante="texto" onClick={() => revisada(m.id)}>Dar por revisada</Boton>}</div>}</div>
+        {!det.cerrado && !soloVer && <Boton chico variante="secundario" icono={Pencil} onClick={() => setAj({ cedula: det.cedula, fecha: det.fecha, tipo: t, hora: m ? m.hora.slice(11) : '', motivo: '', existe: !!m })}>{m ? 'Corregir' : 'Agregar'}</Boton>}</li>; })}</ul>
       {det.cerrado && <Aviso>Este día pertenece a una nómina cerrada y ya no se puede modificar.</Aviso>}</>}</Hoja>
     <Hoja abierta={!!aj} alCerrar={() => setAj(null)} titulo={aj ? `${aj.existe ? 'Corregir' : 'Agregar'}: ${NOMBRE_TIPO[aj.tipo]}` : ''} alto={0.6}>{aj && <>
       <Campo etiqueta="Hora correcta" type="time" value={aj.hora} onChange={(e) => setAj({ ...aj, hora: e.target.value })} />
@@ -173,16 +185,18 @@ function Marcaciones({ centros }) {
 
 /* ---------- Estructura ---------- */
 const MENU = [['Día a día', [['tablero', 'Hoy', LayoutDashboard], ['marcaciones', 'Marcaciones', ClipboardList, 'revisar'], ['permisos', 'Permisos', CalendarCheck, 'permisos'], ['extras', 'Horas extra', Timer, 'extras'], ['incapacidades', 'Incapacidades', Stethoscope]]],
-  ['Pago', [['nomina', 'Nómina y desprendibles', Wallet], ['obras', 'Resumen por obra', FileSpreadsheet]]],
-  ['Empresa', [['personal', 'Personal', Users, 'usuarios'], ['centros', 'Centros de trabajo', Building2], ['alertas', 'Alertas', BellRing], ['config', 'Configuración', Settings], ['sistema', 'Sistema y respaldo', HeartPulse]]]];
+  ['Pago', [['informes', 'Informes', BarChart3], ['nomina', 'Nómina y desprendibles', Wallet], ['obras', 'Resumen por obra', FileSpreadsheet]]],
+  ['Empresa', [['personal', 'Personal', Users, 'usuarios'], ['centros', 'Centros de trabajo', Building2], ['turnos', 'Turnos', CalendarClock], ['alertas', 'Alertas', BellRing], ['config', 'Configuración', Settings], ['sistema', 'Sistema y respaldo', HeartPulse]]]];
 export default function Admin({ yo, recargarYo, alSalir }) {
-  const [vista, setVista] = useState('tablero'), centrosC = useCarga(() => api('adminCentros'), []), pend = useCarga(() => api('adminTablero').then((d) => d.pendientes), [vista]);
+  window.__yo = yo;
+  const [vista, setVista] = useState('tablero'), centrosC = useCarga(() => api('adminCentros'), []), pend = useCarga(() => api('adminTablero').then((d) => d.pendientes), [vista === 'tablero']), sup = yo.usuario.rol !== 'admin';
+  const menu = sup ? [['Mi equipo', MENU[0][1].filter((x) => ['tablero', 'marcaciones', 'permisos', 'extras'].includes(x[0])).concat([['informes', 'Informes', BarChart3]])]] : MENU;
   const centros = centrosC.datos || [], ir = (v) => { setVista(v); window.scrollTo(0, 0); }, n = (k) => (k && pend.datos ? pend.datos[k] : 0);
-  const comun = { centros, cfg: yo.cfg, ir };
+  const comun = { centros, cfg: yo.cfg, ir, soloVer: sup };
   return <div className="admin">
-    <nav className="admin-nav no-imprimir" aria-label="Administración">{MENU.map(([g, items]) => <div key={g}><h2>{g}</h2>{items.map(([k, t, I, c]) => <button key={k} aria-current={vista === k ? 'page' : undefined} onClick={() => ir(k)}><I size={18} aria-hidden="true" />{t}{n(c) > 0 && <span className="cuenta" aria-label={`${n(c)} pendientes`}>{n(c)}</span>}</button>)}</div>)}
+    <nav className="admin-nav no-imprimir" aria-label="Administración">{menu.map(([g, items]) => <div key={g}><h2>{g}</h2>{items.map(([k, t, I, c]) => <button key={k} aria-current={vista === k ? 'page' : undefined} onClick={() => ir(k)}><I size={18} aria-hidden="true" />{t}{n(c) > 0 && <span className="cuenta" aria-label={`${n(c)} pendientes`}>{n(c)}</span>}</button>)}</div>)}
       <div style={{ marginTop: 16, borderTop: '1px solid var(--c-borde)', paddingTop: 8 }}><button onClick={alSalir}><LogOut size={18} aria-hidden="true" />Cerrar sesión</button></div></nav>
-    <div className="admin-movil no-imprimir"><Campo como="select" etiqueta="Sección de administración" value={vista} onChange={(e) => ir(e.target.value)}>{MENU.map(([g, items]) => <optgroup key={g} label={g}>{items.map(([k, t, , c]) => <option key={k} value={k}>{t}{n(c) > 0 ? ` (${n(c)})` : ''}</option>)}</optgroup>)}</Campo></div>
+    <div className="admin-movil no-imprimir"><Campo como="select" etiqueta="Sección de administración" value={vista} onChange={(e) => ir(e.target.value)}>{menu.map(([g, items]) => <optgroup key={g} label={g}>{items.map(([k, t, , c]) => <option key={k} value={k}>{t}{n(c) > 0 ? ` (${n(c)})` : ''}</option>)}</optgroup>)}</Campo></div>
     <main className="admin-cuerpo" id="contenido" tabIndex={-1}>
       {vista === 'tablero' && <Tablero ir={ir} />}
       {vista === 'personal' && <Personal {...comun} />}
@@ -196,6 +210,8 @@ export default function Admin({ yo, recargarYo, alSalir }) {
       {vista === 'alertas' && <Alertas {...comun} />}
       {vista === 'config' && <Config {...comun} recargarYo={recargarYo} />}
       {vista === 'sistema' && <Sistema {...comun} />}
+      {vista === 'turnos' && <Turnos {...comun} />}
+      {vista === 'informes' && <Informes {...comun} />}
     </main>
   </div>;
 }
