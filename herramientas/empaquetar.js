@@ -3,7 +3,7 @@
 const fs = require('fs'), path = require('path');
 const raiz = path.join(__dirname, '..'), url = (process.argv[2] || '').trim();
 if (url && !/^https:\/\/[^\s"']+\/$/.test(url)) { console.error('La dirección debe empezar por https:// y terminar en /'); process.exit(1); }
-const partes = ['Motor.gs', 'Base.gs', 'Servicios.gs', 'Turnos.gs', 'Informes.gs', 'Tareas.gs'].map((f) => {
+const partes = ['Motor.gs', 'Base.gs', 'Servicios.gs', 'Turnos.gs', 'Informes.gs', 'Modulos.gs', 'Tareas.gs'].map((f) => {
   let s = fs.readFileSync(path.join(raiz, 'apps-script', f), 'utf8');
   if (f === 'Motor.gs') s = s.replace("if (typeof module !== 'undefined') module.exports = Motor;", '');
   if (f === 'Base.gs' && url) s = s.replace("var APP_PREDETERMINADA = '';", `var APP_PREDETERMINADA = '${url}';`);

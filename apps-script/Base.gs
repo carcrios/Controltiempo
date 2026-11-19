@@ -3,29 +3,39 @@
  * Base: acceso a datos, seguridad, configuración y enrutador de la API.
  * Una hoja de cálculo = una empresa. Nada de la empresa está escrito en el código: todo vive en la hoja Config.
  */
-var VERSION = '1.2.0';
+var VERSION = '1.6.0';
 // Página publicada (GitHub Pages) que usan tus clientes. Déjala escrita en la plantilla para que el instalador entregue el enlace listo.
 var APP_PREDETERMINADA = '';
+// Clave secreta del proveedor para firmar llaves de licencia por plan/módulos. Si está vacía, todos los módulos quedan activos (modo demostración).
+var CLAVE_LICENCIA_PROVEEDOR = '';
+var PLANES = {
+  basico: { maxUsuarios: 25, modulos: ['asistencia'] },
+  profesional: { maxUsuarios: 80, modulos: ['asistencia', 'nomina', 'permisos', 'turnos', 'prestamos', 'autoservicio'] },
+  empresa: { maxUsuarios: 150, modulos: ['asistencia', 'nomina', 'permisos', 'turnos', 'prestamos', 'autoservicio', 'kiosco', 'qr', 'presupuesto', 'tablero360', 'seguridadPro'] }
+};
 var _AHORA = null; // solo para pruebas
 
 var HOJAS = {
   Config: ['clave', 'valor'],
-  Usuarios: ['cedula', 'nombre', 'cargo', 'rol', 'centroId', 'salario', 'salarioOk', 'tipoPago', 'email', 'telefono', 'ingreso', 'eps', 'arl', 'estado', 'hash', 'salt', 'codigo', 'consVersion', 'consFecha', 'creado', 'supCentros', 'banco', 'tipoCuenta', 'cuenta', 'retiro'],
+  Usuarios: ['cedula', 'nombre', 'cargo', 'rol', 'centroId', 'salario', 'salarioOk', 'tipoPago', 'email', 'telefono', 'ingreso', 'eps', 'arl', 'estado', 'hash', 'salt', 'codigo', 'consVersion', 'consFecha', 'creado', 'supCentros', 'banco', 'tipoCuenta', 'cuenta', 'retiro', 'dispositivoId', 'fotoRef', 'tipoContrato', 'finContrato'],
   Sesiones: ['hash', 'cedula', 'creado', 'expira', 'equipo'],
-  Centros: ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo'],
+  Centros: ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo', 'poligono', 'exigirQr', 'presupuestoHoras', 'presupuestoCosto'],
   Jefes: ['id', 'nombre', 'cargo', 'email', 'whatsapp', 'pin', 'centros', 'activo'],
   Marcaciones: ['id', 'cedula', 'fecha', 'tipo', 'hora', 'servidor', 'lat', 'lng', 'prec', 'dist', 'enZona', 'centroId', 'foto', 'fotoExigida', 'manual', 'motivo', 'estado', 'horario', 'origen', 'editadoPor'],
   Permisos: ['id', 'cedula', 'tipo', 'cat', 'remunerado', 'fechaSalida', 'horaSalida', 'fechaRegreso', 'horaRegreso', 'motivo', 'soporte', 'estado', 'creado', 'limite', 'firmas', 'decididoPor', 'decididoEl', 'obs'],
   Incapacidades: ['id', 'cedula', 'tipo', 'desde', 'hasta', 'entidad', 'nota', 'soporte', 'registradoPor', 'creado'],
   Extras: ['id', 'cedula', 'fecha', 'minCalc', 'minAprob', 'estado', 'decididoPor', 'decididoEl', 'obs'],
-  Nomina: ['id', 'desde', 'hasta', 'cedula', 'nombre', 'neto', 'detalle', 'generado'],
+  Nomina: ['id', 'desde', 'hasta', 'cedula', 'nombre', 'neto', 'detalle', 'generado', 'acuse'],
   Periodos: ['desde', 'hasta', 'cerradoPor', 'cerradoEl'],
   Novedades: ['id', 'cedula', 'fecha', 'concepto', 'valor', 'salarial', 'nota', 'creadoPor', 'creado'],
   Turnos: ['id', 'nombre', 'e', 's', 'ai', 'af', 'dias', 'activo'],
   Programacion: ['id', 'cedula', 'desde', 'hasta', 'turnoId', 'creadoPor', 'creado'],
   Alertas: ['fecha', 'tipo', 'cedula', 'detalle', 'enviadoA', 'estado'],
-  Auditoria: ['fecha', 'actor', 'accion', 'detalle'],
-  Errores: ['fecha', 'cedula', 'origen', 'mensaje', 'detalle', 'equipo', 'version']
+  Auditoria: ['fecha', 'actor', 'accion', 'detalle', 'hash'],
+  Errores: ['fecha', 'cedula', 'origen', 'mensaje', 'detalle', 'equipo', 'version'],
+  Prestamos: ['id', 'cedula', 'concepto', 'monto', 'cuotas', 'cuotaValor', 'pagadas', 'saldo', 'estado', 'creadoPor', 'creado'],
+  Compensatorios: ['id', 'cedula', 'fecha', 'minutos', 'tipo', 'motivo', 'creadoPor', 'creado'],
+  Comunicados: ['id', 'titulo', 'cuerpo', 'centros', 'creadoPor', 'creado', 'leidos']
 };
 
 var TIPOS_ALERTA = {
@@ -33,18 +43,20 @@ var TIPOS_ALERTA = {
   marcacion_manual: 'Marcación con hora digitada', bloqueo_permisos: 'Bloqueó la ubicación o la cámara', sin_foto: 'Marcación sin la foto exigida',
   incompleto: 'Jornada sin salida', permiso_nuevo: 'Nueva solicitud de permiso', permiso_vencido: 'Permiso sin respuesta a tiempo',
   permiso_resuelto: 'Permiso aprobado o rechazado', extras_tope: 'Horas extra por encima del tope legal', extras_pendientes: 'Horas extra por aprobar',
-  fatiga: 'Jornada continua cerca del máximo (fatiga)', seguridad: 'Intentos de acceso sospechosos', registro_nuevo: 'Nuevo usuario por aprobar', respaldo: 'Resultado de la copia de seguridad', error_sistema: 'Error del sistema'
+  fatiga: 'Jornada continua cerca del máximo (fatiga)', seguridad: 'Intentos de acceso sospechosos', registro_nuevo: 'Nuevo usuario por aprobar', respaldo: 'Resultado de la copia de seguridad', error_sistema: 'Error del sistema', contrato_vencimiento: 'Contrato próximo a vencer', gps_sospechoso: 'Ubicación sospechosa (posible GPS falso)', presupuesto_obra: 'Alerta de presupuesto de obra'
 };
 
 var CFG_DEF = {
   empresa: { nombre: 'Mi empresa', nit: '', direccion: '', telefono: '', logo: '', color: '', correoDatos: '', responsableDatos: '', titularSoftware: '' },
   urlApp: '', zona: 'America/Bogota', periodoNomina: 'quincenal',
-  fotoProbabilidad: 30, geocercaEstricta: false, radioDefecto: 150, toleranciaMin: 5, recordatorioMin: 5, recordatorioCorreo: false,
+  fotoProbabilidad: 30, geocercaEstricta: false, soloCentroAsignado: false, maxPrecisionGps: 120, qrVentanaSeg: 60, fotoEnAnomalia: true, radioDefecto: 150, toleranciaMin: 5, recordatorioMin: 5, recordatorioCorreo: false,
   factorPrestacional: 0, fatigaHorasMax: 10, fatigaAvisoMin: 30, codigosConcepto: {},
   minutosAusencia: 60, diasAtrasManual: 3, horasLimitePermiso: 24, aprobacionFinalAdmin: true,
-  autoRegistro: true, codigoEmpresa: '', sesionDias: 90,
+  autoRegistro: true, codigoEmpresa: '', sesionDias: 90, sesionAdminHoras: 24, admin2FA: false,
   correoAlertas: '', alertas: {},
-  retencionFotosDias: 30, retencionGpsDias: 365, respaldoCadaDias: 7, respaldoConservar: 8,
+  retencionFotosDias: 30, retencionGpsDias: 365, retencionSoportesDias: 365, archivarMeses: 12, respaldoCadaDias: 7, respaldoConservar: 8,
+  vincularDispositivo: false, alertasAgrupadas: false, telegramToken: '', telegramChatId: '',
+  contactosEmergencia: [],
   versionLegal: '2026-11',
   legal: {} // parámetros del motor que la empresa quiera sobrescribir
 };
@@ -67,7 +79,15 @@ function isoMs_(iso) { var p = String(iso).match(/(\d+)-(\d+)-(\d+)T(\d+):(\d+)/
 function hex_(bytes) { return bytes.map(function (b) { return ('0' + ((b + 256) % 256).toString(16)).slice(-2); }).join(''); }
 function sha_(s) { return hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, s, Utilities.Charset.UTF_8)); }
 function hmac_(s) { return hex_(Utilities.computeHmacSha256Signature(s, prop_('SECRETO'))); }
+function igualSeguro_(a, b) {
+  a = String(a || ''); b = String(b || '');
+  var d = a.length ^ b.length, len = Math.max(a.length, b.length);
+  for (var i = 0; i < len; i++) d |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return d === 0;
+}
 function hashClave_(clave, salt) { var h = salt + '|' + clave; for (var i = 0; i < 150; i++) h = sha_(h + salt); return h; }
+function hashClaveV2_(clave, salt) { var h = hmac_(salt + '|' + clave); for (var i = 0; i < 2000; i++) h = hmac_(h + '|' + salt); return 'v2:' + h; }
+function verificarClave_(clave, salt, hash) { if (!hash) return false; return String(hash).indexOf('v2:') === 0 ? igualSeguro_(hashClaveV2_(clave, salt), hash) : igualSeguro_(hashClave_(clave, salt), hash); }
 function azar_() { return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, ''); }
 function codigo6_() { return String(parseInt(azar_().substr(0, 8), 16) % 900000 + 100000); }
 function id_() { return azar_().substr(0, 16); }
@@ -77,6 +97,24 @@ function json_(s, def) { try { return s ? JSON.parse(s) : def; } catch (e) { ret
 function distancia_(a, b, c, d) {
   var R = 6371000, r = Math.PI / 180, x = (c - a) * r, y = (d - b) * r, q = Math.sin(x / 2) * Math.sin(x / 2) + Math.cos(a * r) * Math.cos(c * r) * Math.sin(y / 2) * Math.sin(y / 2);
   return Math.round(2 * R * Math.atan2(Math.sqrt(q), Math.sqrt(1 - q)));
+}
+function enPoligono_(lat, lng, poly) {
+  if (!Array.isArray(poly) || poly.length < 3) return false;
+  var dentro = false;
+  for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    var xi = +poly[i][0], yi = +poly[i][1], xj = +poly[j][0], yj = +poly[j][1];
+    if (((yi > lng) !== (yj > lng)) && (lat < (xj - xi) * (lng - yi) / ((yj - yi) || 1e-12) + xi)) dentro = !dentro;
+  }
+  return dentro;
+}
+function codigoQrCentro_(centroId, ventana) { return hmac_('qr|' + centroId + '|' + ventana).substr(0, 6).toUpperCase(); }
+function codigoDiaCentro_(centroId, fecha) { return hmac_('qrdia|' + centroId + '|' + fecha).substr(0, 6).toUpperCase(); }
+function validarQrCentro_(centroId, entrada) {
+  var raw = txt_(entrada, 80).toUpperCase(); if (!raw) return false;
+  var a = ahora_(), seg = Math.max(30, +cfg_().qrVentanaSeg || 60), w = Math.floor(a.ms / (seg * 1000));
+  if (raw === codigoDiaCentro_(centroId, a.fecha)) return true;
+  var cod = raw.indexOf('CJ:') === 0 ? raw.split(':').pop() : raw;
+  return cod === codigoQrCentro_(centroId, w) || cod === codigoQrCentro_(centroId, w - 1);
 }
 // Contador de FALLOS (no de intentos): bloquea adivinar claves aunque el atacante cambie de cédula o de permiso.
 function fallo_(clave, seg) { var c = CacheService.getScriptCache(), k = 'fl:' + clave, n = +(c.get(k) || 0) + 1; c.put(k, String(n), seg); return n; }
@@ -143,7 +181,12 @@ function cfgSet_(clave, valor) {
 function legal_() { return Motor.cfg(cfg_().legal); }
 
 /* ---------- Auditoría, alertas, errores ---------- */
-function auditar_(actor, accion, detalle) { agregar('Auditoria', { fecha: ahora_().iso, actor: actor, accion: accion, detalle: txt_(typeof detalle === 'string' ? detalle : JSON.stringify(detalle), 2000) }); }
+function auditar_(actor, accion, detalle) {
+  var fecha = ahora_().iso, det = txt_(typeof detalle === 'string' ? detalle : JSON.stringify(detalle), 2000);
+  var prev = leer('Auditoria', 1), ant = prev.length ? (prev[0].hash || '') : 'GENESIS';
+  var h = hmac_(ant + '|' + fecha + '|' + actor + '|' + accion + '|' + det).substr(0, 32);
+  agregar('Auditoria', { fecha: fecha, actor: actor, accion: accion, detalle: det, hash: h });
+}
 function correo_(para, asunto, cuerpo) {
   para = String(para || '').split(/[,; ]+/).filter(function (x) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x); });
   if (!para.length) return '';
@@ -153,13 +196,25 @@ function correo_(para, asunto, cuerpo) {
     return para.join(',');
   } catch (e) { return 'FALLÓ: ' + e.message; }
 }
+function telegram_(texto) {
+  var c = cfg_(), tok = prop_('TELEGRAM_TOKEN') || c.telegramToken; if (!tok || !c.telegramChatId) return;
+  try {
+    UrlFetchApp.fetch('https://api.telegram.org/bot' + tok + '/sendMessage', {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      payload: JSON.stringify({ chat_id: c.telegramChatId, text: '[' + c.empresa.nombre + '] ' + texto })
+    });
+  } catch (e) { /* no interrumpir por fallo de Telegram */ }
+}
+var ALERTAS_AGRUPABLES = { tardanza: 1, ausencia: 1, fuera_zona: 1, marcacion_manual: 1, sin_foto: 1 };
 function alertar_(tipo, cedula, detalle) {
   var c = cfg_(), a = (c.alertas || {})[tipo] || {}, activo = a.activo !== false, para = a.correos || c.correoAlertas, enviado = '';
-  if (activo && para) {
-    var u = cedula ? buscar('Usuarios', 'cedula', cedula) : null;
+  var diferida = activo && para && c.alertasAgrupadas && ALERTAS_AGRUPABLES[tipo];
+  var u = cedula ? buscar('Usuarios', 'cedula', cedula) : null;
+  if (activo && !diferida) telegram_((TIPOS_ALERTA[tipo] || tipo) + (u ? ' — ' + u.nombre : '') + '\n' + detalle);
+  if (activo && para && !diferida) {
     enviado = correo_(para, TIPOS_ALERTA[tipo] + (u ? ': ' + u.nombre : ''), (u ? u.nombre + ' (C.C. ' + cedula + ')\n' : '') + detalle + '\n\nFecha: ' + ahora_().iso.replace('T', ' '));
   }
-  agregar('Alertas', { fecha: ahora_().iso, tipo: tipo, cedula: cedula || '', detalle: txt_(detalle, 500), enviadoA: enviado, estado: !activo ? 'desactivada' : enviado && enviado.indexOf('@') > 0 ? 'enviada' : 'registrada' });
+  agregar('Alertas', { fecha: ahora_().iso, tipo: tipo, cedula: cedula || '', detalle: txt_(detalle, 500), enviadoA: diferida ? para : enviado, estado: !activo ? 'desactivada' : diferida ? 'pendiente_resumen' : enviado && enviado.indexOf('@') > 0 ? 'enviada' : 'registrada' });
 }
 function registrarError_(origen, err, extra) {
   try {
@@ -168,9 +223,10 @@ function registrarError_(origen, err, extra) {
 }
 
 /* ---------- Sesiones ---------- */
-function crearSesion_(cedula, equipo) {
-  var t = azar_(), a = ahora_();
-  agregar('Sesiones', { hash: sha_(t), cedula: cedula, creado: a.iso, expira: String(a.ms + cfg_().sesionDias * 86400000), equipo: txt_(equipo, 120) });
+function crearSesion_(cedula, equipo, rol) {
+  var t = azar_(), a = ahora_(), c = cfg_();
+  var ttl = rol === 'admin' ? Math.max(1, +c.sesionAdminHoras || 24) * 3600000 : c.sesionDias * 86400000;
+  agregar('Sesiones', { hash: sha_(t), cedula: cedula, creado: a.iso, expira: String(a.ms + ttl), equipo: txt_(equipo, 120) });
   return t;
 }
 function usuarioDeToken_(t) {
@@ -192,18 +248,42 @@ function cerrarSesiones_(cedula, soloHash) {
 }
 function usuarioPublico_(u) {
   return { cedula: u.cedula, nombre: u.nombre, cargo: u.cargo, rol: u.rol, centroId: u.centroId, salario: +u.salario || 0, salarioOk: u.salarioOk === '1', tipoPago: u.tipoPago || 'mensual',
-    email: u.email, telefono: u.telefono, ingreso: String(u.ingreso).substr(0, 10), eps: u.eps, arl: u.arl, estado: u.estado, retiro: String(u.retiro || '').substr(0, 10), supCentros: json_(u.supCentros, []), banco: u.banco || '', tipoCuenta: u.tipoCuenta || '', cuenta: u.cuenta || '', consVersion: String(u.consVersion).indexOf(cfg_().versionLegal) === 0 ? cfg_().versionLegal : u.consVersion, tieneClave: !!u.hash };
+    email: u.email, telefono: u.telefono, ingreso: String(u.ingreso).substr(0, 10), eps: u.eps, arl: u.arl, estado: u.estado, retiro: String(u.retiro || '').substr(0, 10), supCentros: json_(u.supCentros, []), banco: u.banco || '', tipoCuenta: u.tipoCuenta || '', cuenta: u.cuenta || '', consVersion: String(u.consVersion).indexOf(cfg_().versionLegal) === 0 ? cfg_().versionLegal : u.consVersion, tieneClave: !!u.hash, tieneDispositivo: !!u.dispositivoId, tieneFotoRef: !!u.fotoRef, tipoContrato: u.tipoContrato || '', finContrato: String(u.finContrato || '').substr(0, 10) };
 }
 
+/* ---------- Licenciamiento por plan y módulos ---------- */
+function licenciaEfectiva_() {
+  var def = { plan: 'empresa', modulos: PLANES.empresa.modulos.slice(), maxUsuarios: PLANES.empresa.maxUsuarios, vence: '', vencida: false };
+  var raw = prop_('LICENCIA');
+  if (!raw) return CLAVE_LICENCIA_PROVEEDOR ? { plan: 'basico', modulos: PLANES.basico.modulos.slice(), maxUsuarios: PLANES.basico.maxUsuarios, vence: '', vencida: false } : def;
+  var partes = String(raw).split('.');
+  if (partes.length !== 2) return def;
+  if (CLAVE_LICENCIA_PROVEEDOR) {
+    var firma = hex_(Utilities.computeHmacSha256Signature(partes[0], CLAVE_LICENCIA_PROVEEDOR)).substr(0, 32);
+    if (!igualSeguro_(firma, partes[1])) return { plan: 'basico', modulos: PLANES.basico.modulos.slice(), maxUsuarios: PLANES.basico.maxUsuarios, vence: '', vencida: true };
+  }
+  try {
+    var datos = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(partes[0])).getDataAsString('UTF-8'));
+    var base = PLANES[datos.plan] || PLANES.basico;
+    var mods = base.modulos.slice();
+    (datos.modulosExtra || []).forEach(function (m) { if (mods.indexOf(m) < 0) mods.push(m); });
+    var vence = String(datos.vence || '').substr(0, 10);
+    var vencida = !!(vence && /^\d{4}-\d\d-\d\d$/.test(vence) && ahora_().fecha > vence);
+    return { plan: datos.plan || 'basico', modulos: vencida ? ['asistencia'] : mods, maxUsuarios: +datos.maxUsuarios || base.maxUsuarios, vence: vence, vencida: vencida };
+  } catch (e) { return def; }
+}
+function moduloActivo_(mod) { return !mod || licenciaEfectiva_().modulos.indexOf(mod) >= 0; }
+
 /* ---------- Enrutador ---------- */
-var ACCIONES = {}; // nombre -> {fn, rol: 'publico' | 'usuario' | 'admin', escribe}
-function accion_(nombre, rol, escribe, fn) { ACCIONES[nombre] = { fn: fn, rol: rol, escribe: escribe }; }
+var ACCIONES = {}; // nombre -> {fn, rol: 'publico' | 'usuario' | 'admin', escribe, modulo}
+function accion_(nombre, rol, escribe, fn, modulo) { ACCIONES[nombre] = { fn: fn, rol: rol, escribe: escribe, modulo: modulo || '' }; }
 
 function despachar_(req) {
   _c = {}; _cfg = null;
   if (!ACCIONES.publico) registrarAcciones_();
   var a = ACCIONES[req && req.a];
   if (!a) throw E_('ACCION', 'Acción desconocida.');
+  if (a.modulo && !moduloActivo_(a.modulo)) throw E_('MODULO_NO_INCLUIDO', 'El módulo "' + a.modulo + '" no está incluido en tu plan actual.');
   var lock = null;
   if (a.escribe) { lock = LockService.getScriptLock(); if (!lock.tryLock(25000)) throw E_('OCUPADO', 'El sistema está ocupado. Intenta de nuevo en unos segundos.'); }
   try {

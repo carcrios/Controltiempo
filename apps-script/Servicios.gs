@@ -16,11 +16,11 @@ function enAlcance_(u, cedula) { var a = alcance_(u); if (!a) return true; var p
 function centros_() {
   return leer('Centros').map(function (c) {
     return { _f: c._f, id: c.id, nombre: c.nombre, cliente: c.cliente, direccion: c.direccion, lat: c.lat === '' ? null : +c.lat, lng: c.lng === '' ? null : +c.lng,
-      radio: +c.radio || cfg_().radioDefecto, horario: json_(c.horario, {}), tol: c.tol === '' ? cfg_().toleranciaMin : +c.tol, festivos: c.festivos === '1', activo: c.activo !== '0' };
+      radio: +c.radio || cfg_().radioDefecto, horario: json_(c.horario, {}), tol: c.tol === '' ? cfg_().toleranciaMin : +c.tol, festivos: c.festivos === '1', activo: c.activo !== '0', poligono: json_(c.poligono, []), exigirQr: c.exigirQr === '1', presupuestoHoras: +c.presupuestoHoras || 0, presupuestoCosto: +c.presupuestoCosto || 0 };
   });
 }
 function centroDe_(id) { var l = centros_(); for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return null; }
-function centroPub_(c) { var o = {}; ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo'].forEach(function (k) { o[k] = c[k]; }); return o; }
+function centroPub_(c) { var o = {}; ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo', 'poligono', 'exigirQr', 'presupuestoHoras', 'presupuestoCosto'].forEach(function (k) { o[k] = c[k]; }); return o; }
 // Turno programado para una persona en una fecha: undefined = sin programación (rige el horario del centro), null = descanso.
 function turnoDe_(cedula, fecha) {
   var pr = leer('Programacion'), r = null;
@@ -149,7 +149,8 @@ function a_registro(d) {
   }
   var base = u || { cedula: ced, creado: a.iso, tipoPago: 'mensual' };
   base.nombre = base.nombre || txt_(d.nombre, 80); if (!base.nombre) throw E_('DATOS', 'Escribe tu nombre completo.');
-  base.rol = rol; base.estado = estado; base.hash = hashClave_(clave, salt); base.salt = salt; base.codigo = '';
+  base.rol = rol; base.estado = estado; base.hash = hashClaveV2_(clave, salt); base.salt = salt; base.codigo = '';
+  if (c.vincularDispositivo && d.dispositivoId) base.dispositivoId = txt_(d.dispositivoId, 80);
   if (base.salarioOk !== '1') { if (!salario) throw E_('DATOS', 'Escribe tu salario mensual.'); base.salario = salario; base.salarioOk = ''; }
   base.email = base.email || txt_(d.email, 120); base.telefono = base.telefono || soloDigitos_(d.telefono).substr(0, 15);
   base.cargo = base.cargo || txt_(d.cargo, 60); base.centroId = base.centroId || txt_(d.centroId, 20);
@@ -163,20 +164,44 @@ function a_registro(d) {
 function a_login(d) {
   var ced = soloDigitos_(d.cedula); limite_('login:' + ced, 30, 900); bloqueado_('lg:' + ced, 8); bloqueado_('login', 120);
   var u = buscar('Usuarios', 'cedula', ced);
-  if (!u || !u.hash || u.hash !== hashClave_(String(d.clave || ''), u.salt)) {
+  if (!u || !u.hash || !verificarClave_(String(d.clave || ''), u.salt, u.hash)) {
     fallo_('lg:' + ced, 900);
     if (fallo_('login', 600) === 30) alertar_('seguridad', '', 'Hubo 30 ingresos fallidos en 10 minutos desde distintas cédulas. Puede ser un intento de adivinar contraseñas.');
     throw E_('CREDENCIALES', 'La cédula o la contraseña no coinciden.');
   }
   if (u.estado === 'inactivo') throw E_('PERMISO', 'Tu usuario está inactivo. Habla con el administrador.');
+  var c = cfg_(), dev = txt_(d.dispositivoId, 80), cambio = false;
+  if (c.vincularDispositivo && u.rol === 'trabajador') {
+    if (u.dispositivoId && dev && u.dispositivoId !== dev) {
+      alertar_('seguridad', u.cedula, 'Intento de ingreso desde un celular distinto al vinculado.');
+      throw E_('DISPOSITIVO', 'Tu cuenta está vinculada a otro celular. Pide al administrador que autorice el cambio de equipo.');
+    }
+    if (!u.dispositivoId && dev) { u.dispositivoId = dev; cambio = true; }
+  }
+  if (c.admin2FA && u.rol === 'admin' && u.email) {
+    var cch2 = CacheService.getScriptCache(), k2 = '2fa:' + u.cedula, esperado = cch2.get(k2);
+    if (!d.codigo2fa) {
+      var cod2 = codigo6_(); cch2.put(k2, cod2, 300);
+      correo_(u.email, 'Código de verificación de ingreso', 'Tu código de un solo uso para ingresar como administrador es: ' + cod2 + '\n\nVence en 5 minutos.');
+      throw E_('2FA_REQUERIDO', 'Enviamos un código de verificación de 6 dígitos a tu correo.');
+    }
+    if (!esperado || !igualSeguro_(String(d.codigo2fa).trim(), esperado)) {
+      fallo_('lg:' + ced, 900);
+      throw E_('CREDENCIALES', 'El código de verificación no coincide o ya venció.');
+    }
+    cch2.remove(k2);
+  }
+  if (String(u.hash).indexOf('v2:') !== 0) { u.hash = hashClaveV2_(String(d.clave || ''), u.salt); cambio = true; } // migración transparente a v2
+  if (cambio) guardar('Usuarios', u);
   CacheService.getScriptCache().remove('rl:login:' + ced);
-  return { token: crearSesion_(ced, d.equipo), usuario: usuarioPublico_(u) };
+  return { token: crearSesion_(ced, d.equipo, u.rol), usuario: usuarioPublico_(u) };
 }
 function a_salir(d, u, req) { cerrarSesiones_(u.cedula, sha_(String(req.t))); return {}; }
+function a_salirTodas(d, u) { cerrarSesiones_(u.cedula); auditar_(u.cedula, 'cerrar_todas_sesiones', ''); return { ok: true }; }
 function a_cambiarClave(d, u, req) {
-  if (u.hash !== hashClave_(String(d.actual || ''), u.salt)) throw E_('CREDENCIALES', 'La contraseña actual no coincide.');
+  if (!verificarClave_(String(d.actual || ''), u.salt, u.hash)) throw E_('CREDENCIALES', 'La contraseña actual no coincide.');
   if (claveDebil_(d.nueva, u.cedula)) throw E_('DATOS', 'Elige una contraseña de al menos 6 caracteres que no sea tu cédula ni una secuencia fácil.');
-  u.salt = azar_().substr(0, 16); u.hash = hashClave_(String(d.nueva), u.salt); guardar('Usuarios', u);
+  u.salt = azar_().substr(0, 16); u.hash = hashClaveV2_(String(d.nueva), u.salt); guardar('Usuarios', u);
   var mia = sha_(String(req.t)), cch = CacheService.getScriptCache(); // cierra las demás sesiones
   leer('Sesiones').filter(function (s) { return s.cedula === u.cedula && s.hash !== mia; }).sort(function (x, y) { return y._f - x._f; }).forEach(function (s) { cch.remove('ses:' + s.hash); borrar('Sesiones', s); }); auditar_(u.cedula, 'cambio_clave', ''); return {};
 }
@@ -194,7 +219,7 @@ function a_misDatos(d, u) {
 function a_yo(d, u) {
   var c = cfg_(), a = ahora_(), marc = leer('Marcaciones', 30000);
   if (u.rol === 'admin' && !c.urlApp && /^https:\/\//.test(d.base || '')) cfgSet_('urlApp', txt_(d.base, 200));
-  var o = { usuario: usuarioPublico_(u), ahora: a.iso, version: VERSION,
+  var o = { usuario: usuarioPublico_(u), ahora: a.iso, version: VERSION, licencia: licenciaEfectiva_(),
     cfg: { empresa: c.empresa, versionLegal: c.versionLegal, recordatorioMin: c.recordatorioMin, periodoNomina: c.periodoNomina, diasAtrasManual: c.diasAtrasManual, geocercaEstricta: c.geocercaEstricta, horasLimitePermiso: c.horasLimitePermiso },
     centros: centros_().filter(function (x) { return x.activo; }).map(centroPub_), permisosCat: Motor.PERMISOS };
   if (u.estado !== 'activo') { o.centros = []; return o; } // sin aprobar no se entregan datos de la empresa
@@ -235,14 +260,34 @@ function a_marcar(d, u) {
   tiene[tipo] = hora; var ant = null;
   TIPOS.forEach(function (t) { if (!tiene[t]) return; if (ant && isoMs_(tiene[t]) <= isoMs_(ant)) throw E_('ORDEN', 'La hora de "' + NOMBRE_TIPO[t] + '" debe ser posterior a la marcación anterior.'); ant = tiene[t]; });
   if (isoMs_(tiene[tipo]) - isoMs_(tiene.entrada) > 20 * 3600000) throw E_('ORDEN', 'La jornada no puede durar más de 20 horas. Revisa la hora.');
-  // Centro y geocerca
-  var centro = centroDe_(txt_(d.centroId, 20)) || centroDe_(u.centroId), dist = '', enZona = '';
-  if (centro && centro.lat !== null && centro.lng !== null) {
-    dist = distancia_(lat, lng, centro.lat, centro.lng); enZona = dist <= centro.radio + Math.min(+d.prec || 0, 50) ? '1' : '0';
-    if (enZona === '0' && c.geocercaEstricta && !manual) throw E_('FUERA_ZONA', 'Estás a ' + dist + ' m de ' + centro.nombre + '. Acércate al centro de trabajo para marcar.');
+  // Centro, geocerca (polígono o radio), QR dinámico y detección anti-spoofing
+  var prec = Math.round(+d.prec || 0);
+  if (!manual && +c.maxPrecisionGps > 0 && prec > +c.maxPrecisionGps) throw E_('GPS_IMPRECISO', 'La señal GPS es muy imprecisa (' + prec + ' m). Muévete a un lugar despejado e intenta de nuevo.');
+  var centro = (c.soloCentroAsignado && u.centroId) ? centroDe_(u.centroId) : (centroDe_(txt_(d.centroId, 20)) || centroDe_(u.centroId));
+  var dist = '', enZona = '', sospechoso = !!d.gpsSospechoso, motivoSosp = sospechoso ? 'Lectura GPS repetida o sintética.' : '';
+  if (centro && centro.exigirQr && !manual && !validarQrCentro_(centro.id, d.qrCodigo)) {
+    throw E_('QR_REQUERIDO', 'Este centro exige escanear el código QR o ingresar el código del día vigente.');
   }
-  // Foto aleatoria
-  var exigida = !manual && fotoRequerida_(u.cedula, fecha, tipo), fotoId = '', estado = manual ? 'revisar' : 'ok';
+  if (centro && centro.poligono && centro.poligono.length >= 3) {
+    if (centro.lat !== null && centro.lng !== null) dist = distancia_(lat, lng, centro.lat, centro.lng);
+    enZona = enPoligono_(lat, lng, centro.poligono) ? '1' : '0';
+  } else if (centro && centro.lat !== null && centro.lng !== null) {
+    dist = distancia_(lat, lng, centro.lat, centro.lng); enZona = dist <= centro.radio + Math.min(prec, 50) ? '1' : '0';
+  }
+  if (enZona === '0' && c.geocercaEstricta && !manual) throw E_('FUERA_ZONA', 'Estás fuera de ' + centro.nombre + (dist !== '' ? ' (a ' + dist + ' m)' : '') + '. Acércate al centro de trabajo para marcar.');
+  // Velocidad imposible respecto a la marcación anterior del mismo día
+  if (dia && dia.marcas && dia.marcas.length) {
+    var ultM = null;
+    for (var mi = dia.marcas.length - 1; mi >= 0; mi--) { if (dia.marcas[mi].lat !== '' && dia.marcas[mi].lng !== '') { ultM = dia.marcas[mi]; break; } }
+    if (ultM) {
+      var dPrev = distancia_(lat, lng, +ultM.lat, +ultM.lng), dtH = Math.abs(isoMs_(hora) - isoMs_(ultM.hora)) / 3600000;
+      if (dPrev > 500 && dtH > 0 && (dPrev / 1000) / dtH > 150) { sospechoso = true; motivoSosp = 'Desplazamiento imposible: ' + dPrev + ' m en ' + Math.round(dtH * 60) + ' min.'; }
+    }
+  }
+  // Foto aleatoria u obligatoria por anomalía
+  var anomaliaFoto = c.fotoEnAnomalia && (enZona === '0' || sospechoso || prec > 60);
+  var exigida = !manual && (fotoRequerida_(u.cedula, fecha, tipo) || anomaliaFoto), fotoId = '', estado = (manual || sospechoso) ? 'revisar' : 'ok';
+  if (sospechoso) alertar_('gps_sospechoso', u.cedula, motivoSosp + ' (' + NOMBRE_TIPO[tipo] + ', ' + hora.replace('T', ' ') + ')');
   var tardio = offline && isoMs_(a.iso) - isoMs_(hora) > 20 * 60000; if (tardio) estado = 'revisar'; // llegó sin conexión con hora del celular: la revisa el administrador
   if (d.foto) fotoId = guardarImagen_(d.foto, u.cedula + '_' + hora.replace(/[:T]/g, '-') + '_' + tipo + '.jpg', 'CARPETA_FOTOS');
   else if (exigida) { if (!offline) throw E_('FOTO_REQUERIDA', 'Esta marcación pide una foto. Tómala para continuar.'); estado = 'revisar'; }
@@ -431,13 +476,19 @@ function a_adminPersonal() { return leer('Usuarios').map(usuarioPublico_); }
 function a_adminPersonaGuardar(d, adm) {
   var ced = soloDigitos_(d.cedula); if (ced.length < 5 || ced.length > 12) throw E_('DATOS', 'La cédula no es válida.');
   var u = buscar('Usuarios', 'cedula', ced), nuevo = !u, cod = null;
-  if (nuevo) { u = { cedula: ced, creado: ahora_().iso, estado: 'preregistrado', hash: '', salt: '' }; cod = codigo6_(); u.codigo = hmac_('act|' + ced + '|' + cod); }
+  if (nuevo) {
+    var activos = leer('Usuarios').filter(function (x) { return x.estado !== 'inactivo'; }).length, maxU = licenciaEfectiva_().maxUsuarios;
+    if (activos >= maxU) throw E_('LIMITE_PLAN', 'Alcanzaste el límite de ' + maxU + ' personas de tu plan actual.');
+    u = { cedula: ced, creado: ahora_().iso, estado: 'preregistrado', hash: '', salt: '' }; cod = codigo6_(); u.codigo = hmac_('act|' + ced + '|' + cod);
+  }
   if (!txt_(d.nombre, 80)) throw E_('DATOS', 'Escribe el nombre.');
   u.nombre = txt_(d.nombre, 80); u.cargo = txt_(d.cargo, 60); u.rol = ['admin', 'supervisor'].indexOf(d.rol) >= 0 ? d.rol : 'trabajador'; u.centroId = txt_(d.centroId, 20);
   u.supCentros = JSON.stringify((d.supCentros || []).map(function (x) { return txt_(x, 20); }));
   u.banco = txt_(d.banco, 40); u.tipoCuenta = ['ahorros', 'corriente', ''].indexOf(d.tipoCuenta) >= 0 ? d.tipoCuenta || '' : ''; u.cuenta = soloDigitos_(d.cuenta).substr(0, 24);
   u.salario = Math.max(0, Math.round(+d.salario || 0)); u.salarioOk = u.salario ? '1' : ''; u.tipoPago = d.tipoPago === 'dia' ? 'dia' : 'mensual';
   u.email = txt_(d.email, 120); u.telefono = soloDigitos_(d.telefono).substr(0, 15); u.ingreso = /^\d{4}-\d\d-\d\d$/.test(d.ingreso || '') ? d.ingreso : ''; u.eps = txt_(d.eps, 60); u.arl = txt_(d.arl, 60);
+  u.tipoContrato = ['indefinido', 'fijo', 'obra', 'aprendizaje', ''].indexOf(d.tipoContrato || '') >= 0 ? (d.tipoContrato || '') : '';
+  u.finContrato = /^\d{4}-\d\d-\d\d$/.test(d.finContrato || '') ? d.finContrato : '';
   if (!nuevo && d.estado && ['activo', 'inactivo'].indexOf(d.estado) >= 0 && u.hash) {
     if (u.cedula === adm.cedula && d.estado === 'inactivo') throw E_('DATOS', 'No puedes desactivar tu propio usuario.');
     u.estado = d.estado; if (d.estado === 'inactivo') cerrarSesiones_(ced);
@@ -465,6 +516,12 @@ function a_adminPersonaImportar(d, adm) {
 }
 
 function a_adminCentros(d, adm) { var al = alcance_(adm); return centros_().filter(function (c) { return !al || al[c.id]; }).map(centroPub_); }
+function a_adminQrCentro(d, adm) {
+  var c = centroDe_(txt_(d.centroId, 20)); if (!c) throw E_('DATOS', 'Centro no encontrado.');
+  var al = alcance_(adm); if (al && !al[c.id]) throw E_('PERMISO', 'No tienes acceso a este centro.');
+  var a = ahora_(), seg = Math.max(30, +cfg_().qrVentanaSeg || 60), w = Math.floor(a.ms / (seg * 1000)), cod = codigoQrCentro_(c.id, w);
+  return { centroId: c.id, centro: c.nombre, qrPayload: 'CJ:' + c.id + ':' + w + ':' + cod, codigoMinuto: cod, codigoDia: codigoDiaCentro_(c.id, a.fecha), vigenciaSeg: seg, expiraEnSeg: seg - Math.floor((a.ms / 1000) % seg) };
+}
 function a_adminCentroGuardar(d, adm) {
   var c = d.id ? buscar('Centros', 'id', d.id) : null, nuevo = !c; if (nuevo) c = { id: id_().substr(0, 8) };
   if (!txt_(d.nombre, 80)) throw E_('DATOS', 'Escribe el nombre del centro de trabajo.');
@@ -474,6 +531,11 @@ function a_adminCentroGuardar(d, adm) {
   c.lat = d.lat === '' || d.lat === null || isNaN(+d.lat) ? '' : (+d.lat).toFixed(6); c.lng = d.lng === '' || d.lng === null || isNaN(+d.lng) ? '' : (+d.lng).toFixed(6);
   c.radio = Math.max(20, Math.round(+d.radio || cfg_().radioDefecto)); c.horario = JSON.stringify(hor); c.tol = d.tol === '' || d.tol === undefined ? '' : Math.max(0, Math.round(+d.tol));
   c.festivos = d.festivos ? '1' : ''; c.activo = d.activo === false ? '0' : '1';
+  var poly = Array.isArray(d.poligono) ? d.poligono.filter(function (pt) { return Array.isArray(pt) && pt.length === 2 && !isNaN(+pt[0]) && !isNaN(+pt[1]); }).map(function (pt) { return [+(+pt[0]).toFixed(6), +(+pt[1]).toFixed(6)]; }) : [];
+  c.poligono = poly.length >= 3 ? JSON.stringify(poly) : '';
+  c.exigirQr = d.exigirQr ? '1' : '';
+  c.presupuestoHoras = +d.presupuestoHoras > 0 ? String(Math.round(+d.presupuestoHoras)) : '';
+  c.presupuestoCosto = +d.presupuestoCosto > 0 ? String(Math.round(+d.presupuestoCosto)) : '';
   if (nuevo) agregar('Centros', c); else guardar('Centros', c);
   // El horario nuevo aplica desde hoy: cada día ya fichado conserva la foto del horario con que se trabajó.
   auditar_(adm.cedula, nuevo ? 'centro_creado' : 'centro_editado', { id: c.id, nombre: c.nombre, horario: hor });
@@ -585,8 +647,11 @@ function a_adminExtraDecidir(d, adm) {
     if (!(min > 0) || min > +x.minCalc) throw E_('DATOS', 'Los minutos aprobados deben estar entre 1 y ' + x.minCalc + '.');
     if (min > L.maxExtraDiaH * 60 && !d.confirmaTope) throw E_('TOPE', 'Vas a aprobar más de ' + L.maxExtraDiaH + ' horas extra en un día, por encima del máximo legal. Confirma si cuentas con autorización del Ministerio del Trabajo.');
   }
-  x.estado = d.decision === 'aprobar' ? 'aprobada' : 'rechazada'; x.minAprob = min; x.decididoPor = adm.cedula; x.decididoEl = ahora_().iso; x.obs = txt_(d.obs, 200) + (d.confirmaTope ? ' [Aprobado por encima del tope legal]' : '');
-  guardar('Extras', x); auditar_(adm.cedula, 'extra_' + x.estado, { cedula: x.cedula, fecha: x.fecha, min: min, tope: !!d.confirmaTope }); return {};
+  var aComp = d.decision === 'aprobar' && !!d.aCompensatorio;
+  x.estado = d.decision === 'aprobar' ? 'aprobada' : 'rechazada'; x.minAprob = aComp ? 0 : min; x.decididoPor = adm.cedula; x.decididoEl = ahora_().iso; x.obs = txt_(d.obs, 200) + (d.confirmaTope ? ' [Aprobado por encima del tope legal]' : '') + (aComp ? ' [Abonado a banco de compensatorios: ' + min + ' min]' : '');
+  guardar('Extras', x);
+  if (aComp && min > 0) agregar('Compensatorios', { id: id_(), cedula: x.cedula, fecha: x.fecha, minutos: String(min), tipo: 'abono', motivo: 'Horas extra del ' + x.fecha, creadoPor: adm.cedula, creado: ahora_().iso });
+  auditar_(adm.cedula, 'extra_' + x.estado, { cedula: x.cedula, fecha: x.fecha, min: min, tope: !!d.confirmaTope, aCompensatorio: aComp }); return {};
 }
 
 /* ---------- Horas extra en lote y novedades de pago (bonos, auxilios, descuentos) ---------- */
@@ -637,6 +702,13 @@ function a_adminNominaCerrar(d, adm) {
   if (leer('Periodos').some(function (p) { return p.desde <= r.hasta && r.desde <= p.hasta; })) throw E_('CERRADO', 'Ya existe una nómina cerrada que cubre esas fechas.');
   var rev = leer('Marcaciones').filter(function (m) { return m.estado === 'revisar' && m.fecha >= r.desde && m.fecha <= r.hasta; }).length;
   if (rev) throw E_('REVISAR', 'Hay ' + rev + ' marcación(es) digitadas o tardías sin revisar en este periodo. Revísalas en Marcaciones antes de cerrar: con ellas se va a pagar.');
+  // Descuento automático de cuotas de préstamos activos en el cierre de nómina
+  if (d.descontarPrestamos !== false) {
+    leer('Prestamos').filter(function (p) { return p.estado === 'activo' && +p.saldo > 0; }).forEach(function (p) {
+      var ya = leer('Novedades').some(function (n) { return n.cedula === p.cedula && n.fecha >= r.desde && n.fecha <= r.hasta && n.concepto === 'Cuota: ' + p.concepto; });
+      if (!ya) a_adminPrestamoAplicarCuota({ id: p.id, fecha: r.hasta }, adm);
+    });
+  }
   var filas = liquidarTodos_(r.desde, r.hasta, r.hasta);
   filas.forEach(function (x) {
     var det = sinDetalle_(x.liq); det.empresa = { nombre: c.empresa.nombre, nit: c.empresa.nit }; det.persona = { nombre: x.nombre, cedula: x.cedula, cargo: x.cargo, centro: x.centro, salario: x.salario, tipoPago: x.tipoPago };
@@ -651,7 +723,66 @@ function a_adminNominas() {
   return leer('Periodos').reverse().map(function (p) { var t = tot[p.desde + '|' + p.hasta] || { n: 0, neto: 0 }; return { desde: p.desde, hasta: p.hasta, cerradoPor: p.cerradoPor, cerradoEl: p.cerradoEl, personas: t.n, neto: t.neto }; });
 }
 function a_adminNominaDetalle(d) {
-  return leer('Nomina').filter(function (n) { return n.desde === d.desde && n.hasta === d.hasta; }).map(function (n) { return { id: n.id, desde: n.desde, hasta: n.hasta, cedula: n.cedula, nombre: n.nombre, neto: +n.neto, generado: n.generado, detalle: json_(n.detalle, {}) }; });
+  return leer('Nomina').filter(function (n) { return n.desde === d.desde && n.hasta === d.hasta; }).map(function (n) { return { id: n.id, desde: n.desde, hasta: n.hasta, cedula: n.cedula, nombre: n.nombre, neto: +n.neto, generado: n.generado, acuse: n.acuse || '', detalle: json_(n.detalle, {}) }; });
+}
+
+function a_confirmarDesprendible(d, u) {
+  var n = buscar('Nomina', 'id', txt_(d.id, 40));
+  if (!n || n.cedula !== u.cedula) throw E_('DATOS', 'No se encontró ese desprendible.');
+  if (n.acuse) return { acuse: n.acuse };
+  n.acuse = ahora_().iso; guardar('Nomina', n);
+  auditar_(u.cedula, 'desprendible_recibido', { id: n.id, desde: n.desde, hasta: n.hasta });
+  return { acuse: n.acuse };
+}
+
+function a_adminLiberarDispositivo(d, adm) {
+  var u = buscar('Usuarios', 'cedula', soloDigitos_(d.cedula));
+  if (!u) throw E_('DATOS', 'No se encontró la persona.');
+  u.dispositivoId = ''; guardar('Usuarios', u); cerrarSesiones_(u.cedula);
+  auditar_(adm.cedula, 'liberar_dispositivo', u.cedula);
+  return { ok: true };
+}
+
+function a_adminAnonimizarUsuario(d, adm) {
+  var u = buscar('Usuarios', 'cedula', soloDigitos_(d.cedula));
+  if (!u) throw E_('DATOS', 'No se encontró la persona.');
+  if (u.estado !== 'inactivo') throw E_('DATOS', 'Primero desactiva a la persona antes de suprimir sus datos personales.');
+  u.nombre = 'Exempleado ' + sha_(u.cedula + '|' + prop_('SECRETO')).substr(0, 8).toUpperCase();
+  u.email = ''; u.telefono = ''; u.eps = ''; u.arl = ''; u.banco = ''; u.tipoCuenta = ''; u.cuenta = '';
+  u.dispositivoId = ''; u.hash = ''; u.salt = ''; u.codigo = '';
+  if (u.fotoRef) { try { DriveApp.getFileById(u.fotoRef).setTrashed(true); } catch (e) { } u.fotoRef = ''; }
+  guardar('Usuarios', u); cerrarSesiones_(u.cedula);
+  auditar_(adm.cedula, 'anonimizar_usuario', u.cedula);
+  return { ok: true };
+}
+
+function a_adminIncapacidadEditar(d, adm) {
+  var inc = buscar('Incapacidades', 'id', txt_(d.id, 40));
+  if (!inc) throw E_('DATOS', 'No se encontró la incapacidad.');
+  var re = /^\d{4}-\d\d-\d\d$/, desde = re.test(d.desde || '') ? d.desde : inc.desde, hasta = re.test(d.hasta || '') ? d.hasta : inc.hasta;
+  if (hasta < desde) throw E_('DATOS', 'El rango de fechas no es válido.');
+  if (periodoCerrado_(inc.desde) || periodoCerrado_(desde)) throw E_('CERRADO', 'La incapacidad toca un periodo de nómina cerrado.');
+  inc.tipo = ['general', 'laboral', 'maternidad', 'paternidad'].indexOf(d.tipo) >= 0 ? d.tipo : inc.tipo;
+  inc.desde = desde; inc.hasta = hasta;
+  if (d.entidad !== undefined) inc.entidad = txt_(d.entidad, 60);
+  if (d.nota !== undefined) inc.nota = txt_(d.nota, 200);
+  guardar('Incapacidades', inc);
+  auditar_(adm.cedula, 'incapacidad_editada', { id: inc.id, cedula: inc.cedula, desde: inc.desde, hasta: inc.hasta });
+  return { ok: true };
+}
+
+function a_adminTrasladoMasivo(d, adm) {
+  var centroId = txt_(d.centroId, 20), ceds = Array.isArray(d.cedulas) ? d.cedulas : [];
+  if (!centroId || !centroDe_(centroId)) throw E_('DATOS', 'Selecciona un centro de trabajo válido.');
+  if (!ceds.length || ceds.length > 200) throw E_('DATOS', 'Selecciona entre 1 y 200 personas para trasladar.');
+  var movidos = 0;
+  ceds.forEach(function (c) {
+    var u = buscar('Usuarios', 'cedula', soloDigitos_(c));
+    if (!u || u.estado === 'inactivo') return;
+    u.centroId = centroId; guardar('Usuarios', u); movidos++;
+  });
+  auditar_(adm.cedula, 'traslado_masivo', { centroId: centroId, cantidad: movidos, nota: txt_(d.nota, 120) });
+  return { movidos: movidos };
 }
 
 function a_adminResumenObra(d) {
@@ -672,12 +803,14 @@ function a_adminResumenObra(d) {
 /* ---------- Configuración, jefes, monitoreo ---------- */
 function a_adminConfig() {
   var c = cfg_(), o = JSON.parse(JSON.stringify(c)); o.legalEfectivo = legal_(); o.tiposAlerta = TIPOS_ALERTA;
+  o.telegramToken = ''; o.tieneTelegram = !!(prop_('TELEGRAM_TOKEN') || c.telegramToken);
   o.jefes = leer('Jefes').map(function (j) { return { id: j.id, nombre: j.nombre, cargo: j.cargo, email: j.email, whatsapp: j.whatsapp, centros: json_(j.centros, []), activo: j.activo !== '0', tienePin: !!j.pin }; });
   o.codigoAdminPendiente = !!prop_('CODIGO_ADMIN'); return o;
 }
 function a_adminConfigGuardar(d, adm) {
   var cambios = [];
   Object.keys(d).forEach(function (k) {
+    if (k === 'telegramToken') { if (d[k]) { prop_('TELEGRAM_TOKEN', txt_(d[k], 120)); cambios.push('telegramToken'); } return; }
     if (!(k in CFG_DEF) || k === 'zona') return; var v = d[k], def = CFG_DEF[k];
     if (typeof def === 'number') { v = +v; if (isNaN(v) || v < 0) throw E_('DATOS', 'Valor no válido en "' + k + '".'); }
     else if (typeof def === 'boolean') v = !!v;
@@ -702,6 +835,16 @@ function a_adminJefeGuardar(d, adm) {
 function a_adminBitacoras(d) {
   var n = { alertas: 'Alertas', auditoria: 'Auditoria', errores: 'Errores' }[d.cual]; if (!n) throw E_('DATOS', 'Bitácora desconocida.');
   return leer(n, 400).reverse().map(function (r) { var o = {}; HOJAS[n].forEach(function (k) { o[k] = r[k]; }); return o; });
+}
+function a_adminVerificarAuditoria() {
+  var filas = leer('Auditoria'), ant = 'GENESIS', alteradas = [];
+  filas.forEach(function (r) {
+    if (!r.hash) { ant = ''; return; } // filas anteriores a v1.4.1
+    var esp = hmac_(ant + '|' + r.fecha + '|' + r.actor + '|' + r.accion + '|' + r.detalle).substr(0, 32);
+    if (!igualSeguro_(r.hash, esp)) alteradas.push({ fila: r._f, fecha: r.fecha, accion: r.accion });
+    ant = r.hash;
+  });
+  return { total: filas.length, integra: alteradas.length === 0, alteradas: alteradas.slice(0, 50) };
 }
 function a_adminSalud() {
   var a = ahora_(), conteo = {}, disparadores = [], cupo = null, pruebas = autoPrueba_();
@@ -769,6 +912,15 @@ function registrarAcciones_() {
    ['adminRespaldar', A, 1, a_adminRespaldar], ['adminExportar', A, 0, a_adminExportar],
    ['adminExtrasLote', V, 1, a_adminExtrasLote], ['adminNovedades', A, 0, a_adminNovedades], ['adminNovedadGuardar', A, 1, a_adminNovedadGuardar],
    ['adminInforme', V, 0, a_adminInforme], ['miResumen', U, 0, a_miResumen],
-   ['adminTurnos', A, 0, a_adminTurnos], ['adminTurnoGuardar', A, 1, a_adminTurnoGuardar], ['adminProgramar', A, 1, a_adminProgramar], ['adminProgramacionBorrar', A, 1, a_adminProgramacionBorrar]
-  ].forEach(function (x) { accion_(x[0], x[1], !!x[2], x[3]); });
+   ['adminTurnos', A, 0, a_adminTurnos], ['adminTurnoGuardar', A, 1, a_adminTurnoGuardar], ['adminProgramar', A, 1, a_adminProgramar], ['adminProgramacionBorrar', A, 1, a_adminProgramacionBorrar],
+   ['confirmarDesprendible', U, 1, a_confirmarDesprendible, 'nomina'], ['adminLiberarDispositivo', A, 1, a_adminLiberarDispositivo, 'seguridadPro'], ['adminAnonimizarUsuario', A, 1, a_adminAnonimizarUsuario], ['adminIncapacidadEditar', A, 1, a_adminIncapacidadEditar, 'permisos'], ['adminTrasladoMasivo', A, 1, a_adminTrasladoMasivo], ['adminQrCentro', V, 0, a_adminQrCentro, 'qr'],
+   ['kioscoMarcar', V, 1, a_kioscoMarcar, 'kiosco'],
+   ['adminProvisiones', A, 0, a_adminProvisiones, 'nomina'], ['adminLiquidacionContrato', A, 0, a_adminLiquidacionContrato, 'nomina'], ['adminPrestamos', A, 0, a_adminPrestamos, 'prestamos'], ['adminPrestamoGuardar', A, 1, a_adminPrestamoGuardar, 'prestamos'], ['adminPrestamoAplicarCuota', A, 1, a_adminPrestamoAplicarCuota, 'prestamos'],
+   ['misCompensatorios', U, 0, a_misCompensatorios, 'nomina'], ['adminCompensatorioGuardar', A, 1, a_adminCompensatorioGuardar, 'nomina'], ['certificadoLaboral', U, 0, a_certificadoLaboral, 'autoservicio'],
+   ['adminComunicadoCrear', A, 1, a_adminComunicadoCrear, 'autoservicio'], ['adminComunicados', A, 0, a_adminComunicados, 'autoservicio'], ['comunicadosMios', U, 0, a_comunicadosMios, 'autoservicio'], ['comunicadoLeer', U, 1, a_comunicadoLeer, 'autoservicio'],
+   ['adminPresupuestoObras', A, 0, a_adminPresupuestoObras, 'presupuesto'], ['adminEnVivo', V, 0, a_adminEnVivo, 'tablero360'],
+   ['salirTodas', U, 1, a_salirTodas], ['adminVerificarAuditoria', A, 0, a_adminVerificarAuditoria, 'seguridadPro'],
+   ['miProgramacion', U, 0, a_miProgramacion, 'turnos'], ['misPrestamos', U, 0, a_misPrestamos, 'prestamos'], ['misExtras', U, 0, a_misExtras, 'nomina'], ['incapacidadReportar', U, 1, a_incapacidadReportar, 'permisos'], ['contactosEmergencia', U, 0, a_contactosEmergencia],
+   ['adminExpediente360', V, 0, a_adminExpediente360, 'tablero360'], ['adminTablero360', V, 0, a_adminTablero360, 'tablero360'], ['adminLicenciaActivar', A, 1, a_adminLicenciaActivar]
+  ].forEach(function (x) { accion_(x[0], x[1], !!x[2], x[3], x[4]); });
 }

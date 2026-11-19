@@ -22,6 +22,9 @@ function instalar() {
   Object.keys(HOJAS).forEach(function (n) { var h = hoja_(n); h.getRange(1, 1, 1, HOJAS[n].length).setValues([HOJAS[n]]).setFontWeight('bold'); // encabezados al día tras una actualización
     h.getRange(1, 1, h.getMaxRows(), HOJAS[n].length).setNumberFormat('@'); });
   ['Sesiones', 'Auditoria', 'Errores'].forEach(function (n) { var h = ss.getSheetByName(n); if (h && h.hideSheet) h.hideSheet(); }); // hojas técnicas ocultas
+  ['Usuarios', 'Sesiones', 'Marcaciones', 'Nomina', 'Periodos', 'Auditoria'].forEach(function (n) {
+    try { var h = ss.getSheetByName(n); if (h && !h.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) h.protect().setDescription('Protegida por Control de jornada').setWarningOnly(true); } catch (e) { }
+  });
   if (!prop_('SECRETO')) prop_('SECRETO', azar_() + azar_());
   var raiz = DriveApp.getFileById(ss.getId()).getParents(), padre = raiz.hasNext() ? raiz.next() : DriveApp.getRootFolder();
   if (!prop_('CARPETA_FOTOS')) prop_('CARPETA_FOTOS', padre.createFolder('Control de jornada - Fotos y soportes (privado)').getId());
@@ -118,7 +121,27 @@ function tareaCada15() { tarea_('cada15', function () {
     }
   });
   prop_('AVISO_AUSENCIA', JSON.stringify(aus)); prop_('AVISO_INCOMPLETO', JSON.stringify(inc)); prop_('AVISO_FATIGA', JSON.stringify(fat));
+  if (c.alertasAgrupadas && unaVez_('digest:' + a.iso.substr(0, 13), 3300)) enviarResumenAlertas_();
 }); }
+
+function enviarResumenAlertas_() {
+  var pend = leer('Alertas').filter(function (x) { return x.estado === 'pendiente_resumen'; });
+  if (!pend.length) return;
+  var porCorreo = {}, nombres = {};
+  leer('Usuarios').forEach(function (u) { nombres[u.cedula] = u.nombre; });
+  pend.forEach(function (x) {
+    var dest = x.enviadoA || cfg_().correoAlertas; if (!dest) return;
+    (porCorreo[dest] = porCorreo[dest] || []).push(x);
+  });
+  Object.keys(porCorreo).forEach(function (dest) {
+    var lista = porCorreo[dest];
+    var cuerpo = 'Resumen de ' + lista.length + ' alerta(s) reciente(s):\n\n' + lista.map(function (x) {
+      return '• [' + x.fecha.replace('T', ' ') + '] ' + (TIPOS_ALERTA[x.tipo] || x.tipo) + (x.cedula ? ' — ' + (nombres[x.cedula] || x.cedula) : '') + ': ' + x.detalle;
+    }).join('\n');
+    var res = correo_(dest, 'Resumen de alertas (' + lista.length + ')', cuerpo);
+    lista.forEach(function (x) { x.estado = res && res.indexOf('@') > 0 ? 'enviada' : 'registrada'; x.enviadoA = res || dest; guardar('Alertas', x); });
+  });
+}
 
 /** Diaria (2:00 a. m.): retención de fotos y GPS, sesiones vencidas, resumen de extras y copia de seguridad. */
 function tareaDiaria() { tarea_('diaria', function () {
@@ -127,6 +150,26 @@ function tareaDiaria() { tarea_('diaria', function () {
   leer('Sesiones').filter(function (s) { return +s.expira < a.ms; }).sort(function (x, y) { return y._f - x._f; }).forEach(function (s) { borrar('Sesiones', s); });
   var pend = leer('Extras').filter(function (x) { return x.estado === 'pendiente'; }).length;
   if (pend) alertar_('extras_pendientes', '', 'Hay ' + pend + ' registro(s) de horas extra esperando aprobación. Las horas extra sin aprobar no entran a la nómina.');
+  // Contratos próximos a vencer (preaviso legal de 30 días en Colombia: avisa desde 35 días antes)
+  leer('Usuarios').forEach(function (u) {
+    var fin = String(u.finContrato || '').substr(0, 10);
+    if (u.estado !== 'activo' || !/^\d{4}-\d\d-\d\d$/.test(fin)) return;
+    var faltan = Motor.diasEntre(a.fecha, fin);
+    if (faltan >= 0 && faltan <= 35 && unaVez_('vence:' + u.cedula + ':' + fin, 6 * 86400)) {
+      alertar_('contrato_vencimiento', u.cedula, 'El contrato (' + (u.tipoContrato || 'término fijo') + ') vence el ' + fin + ' (en ' + faltan + ' día(s)). Recuerda el preaviso legal de 30 días.');
+    }
+  });
+  if (c.archivarMeses > 0) archivarHistorico_();
+  // Cruce automático de presupuesto de obras del mes en curso (alerta al 80 % y 100 %)
+  try {
+    var iniMes = a.fecha.substr(0, 8) + '01', pres = a_adminPresupuestoObras({ desde: iniMes, hasta: a.fecha });
+    pres.obras.forEach(function (o) {
+      if (o.alerta === 'ok') return;
+      if (unaVez_('pres:' + o.centroId + ':' + iniMes + ':' + o.alerta, 25 * 86400)) {
+        alertar_('presupuesto_obra', '', 'La obra "' + o.centro + '" está en nivel ' + o.alerta.toUpperCase() + ' de presupuesto (horas: ' + (o.pctHoras || 0) + ' %, costo: ' + (o.pctCosto || 0) + ' %).');
+      }
+    });
+  } catch (e) { }
   var ult = prop_('ULTIMO_RESPALDO');
   if (c.respaldoCadaDias > 0 && (!ult || Motor.diasEntre(ult.substr(0, 10), a.fecha) >= c.respaldoCadaDias)) respaldar_();
 }); }
@@ -146,7 +189,43 @@ function limpiarDatos_() {
   ['Alertas', 'Errores'].forEach(function (nh) { // las bitácoras con datos personales también caducan
     var hh = hoja_(nh), k = hh.getLastRow() - 1; if (k < 1) return; var vv = hh.getRange(2, 1, k, 1).getValues(), q = 0;
     while (q < vv.length && String(vv[q][0]).substr(0, 10) < limGps) q++; if (q) { hh.deleteRows(2, q); sucio_(nh); } });
-  prop_('ULTIMA_LIMPIEZA', a.iso + ' · ' + borradas + ' foto(s) eliminada(s)');
+  // Retención de soportes de permisos e incapacidades
+  var limSop = Motor.sumar(a.fecha, -(c.retencionSoportesDias || 365)), sopBorrados = 0;
+  [['Permisos', 'fechaRegreso'], ['Incapacidades', 'hasta']].forEach(function (par) {
+    leer(par[0]).forEach(function (r) {
+      if (r.soporte && r[par[1]] && String(r[par[1]]).substr(0, 10) < limSop && sopBorrados < 200) {
+        try { DriveApp.getFileById(String(r.soporte)).setTrashed(true); } catch (e) { }
+        r.soporte = ''; guardar(par[0], r); sopBorrados++;
+      }
+    });
+  });
+  prop_('ULTIMA_LIMPIEZA', a.iso + ' · ' + borradas + ' foto(s), ' + sopBorrados + ' soporte(s) eliminado(s)');
+}
+
+/** Archiva marcaciones antiguas de periodos ya cerrados para mantener ágil la hoja activa. */
+function archivarHistorico_() {
+  var a = ahora_(), c = cfg_(), meses = +c.archivarMeses || 12;
+  var lim = Motor.sumar(a.fecha, -meses * 30), h = hoja_('Marcaciones'), cols = HOJAS.Marcaciones, n = h.getLastRow() - 1;
+  if (n < 500) return; // solo archiva cuando ya hay volumen relevante
+  var iF = cols.indexOf('fecha'), v = h.getRange(2, 1, n, cols.length).getValues(), mover = [], conservar = [];
+  for (var i = 0; i < v.length; i++) {
+    var f = String(v[i][iF]).substr(0, 10);
+    if (f && f < lim && periodoCerrado_(f)) mover.push(v[i]); else conservar.push(v[i]);
+  }
+  if (mover.length < 100) return;
+  try {
+    var carpeta = DriveApp.getFolderById(prop_('CARPETA_RESPALDOS'));
+    var nombre = 'Histórico Marcaciones ' + a.fecha.substr(0, 4) + ' - ' + c.empresa.nombre;
+    var it = carpeta.getFilesByName(nombre), archSs = it.hasNext() ? SpreadsheetApp.openById(it.next().getId()) : SpreadsheetApp.create(nombre);
+    if (!it.hasNext()) { try { DriveApp.getFileById(archSs.getId()).moveTo(carpeta); } catch (e) { } }
+    var ah = archSs.getSheetByName('Marcaciones') || archSs.insertSheet('Marcaciones');
+    if (ah.getLastRow() === 0) ah.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight('bold');
+    ah.getRange(ah.getLastRow() + 1, 1, mover.length, cols.length).setValues(mover);
+    h.getRange(2, 1, n, cols.length).clearContent();
+    if (conservar.length) h.getRange(2, 1, conservar.length, cols.length).setValues(conservar);
+    sucio_('Marcaciones');
+    auditar_('sistema', 'archivar_historico', { archivadas: mover.length, archivo: nombre });
+  } catch (e) { registrarError_('archivar_historico', e); }
 }
 
 /** Copia completa de la hoja de cálculo a la carpeta de respaldos. Conserva las últimas N. */

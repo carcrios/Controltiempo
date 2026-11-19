@@ -1,9 +1,9 @@
 // Cliente de la API (Apps Script). Conexión por empresa, sesión persistente, bandeja de salida sin señal y reporte de errores.
-export const VERSION = '1.2.0';
+export const VERSION = '1.4.0';
 const CFG = window.CONFIG || {};
 const FIJA = CFG.API_URL || '';                                   // una sola empresa: dirección escrita en config.js
 const BASE = CFG.BASE_API || 'https://script.google.com/macros/s/'; // varias empresas: cada una entra con su enlace
-const K = { token: 'cj.token', yo: 'cj.yo', salida: 'cj.salida', publico: 'cj.publico', api: 'cj.api', rech: 'cj.rechazadas', desfase: 'cj.desfase' };
+const K = { token: 'cj.token', yo: 'cj.yo', salida: 'cj.salida', publico: 'cj.publico', api: 'cj.api', rech: 'cj.rechazadas', desfase: 'cj.desfase', disp: 'cj.dispositivo' };
 
 export const guardado = {
   leer(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } },
@@ -41,23 +41,38 @@ const equipo = () => (navigator.userAgent || '').slice(0, 110);
 let alCaducar = () => {};
 export const alCaducarSesion = (f) => { alCaducar = f; };
 
-export async function api(a, d = {}, { espera = 45000, url } = {}) {
+export async function api(a, d = {}, { espera = 45000, url, reintentos = 3 } = {}) {
   const destino = url || conexion.url;
   if (!destino) throw new ErrorApi('CONFIG', 'Esta aplicación aún no está conectada con una empresa.');
   if (!navigator.onLine) throw new ErrorApi('RED', 'No hay conexión a internet.');
-  const ctl = new AbortController(), reloj = setTimeout(() => ctl.abort(), espera);
-  let res;
-  try {
-    // text/plain evita la verificación previa (CORS) que Apps Script no responde.
-    res = await fetch(destino, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a, d, t: url ? null : sesion.token, v: VERSION }), redirect: 'follow', signal: ctl.signal });
-  } catch (e) { throw new ErrorApi('RED', ctl.signal.aborted ? 'El servidor tardó demasiado en responder.' : 'No se pudo conectar con el servidor.'); }
-  finally { clearTimeout(reloj); }
-  let j; try { j = await res.json(); } catch { throw new ErrorApi('RED', 'El servidor respondió algo inesperado. Intenta de nuevo.'); }
-  if (!j.ok) { if (j.e === 'SESION' && sesion.token && !url) { sesion.cerrar(false); alCaducar(); } throw new ErrorApi(j.e, j.m); }
-  return j.d;
+  for (let intento = 0; intento <= reintentos; intento++) {
+    const ctl = new AbortController(), reloj = setTimeout(() => ctl.abort(), espera);
+    let res;
+    try {
+      // text/plain evita la verificación previa (CORS) que Apps Script no responde.
+      res = await fetch(destino, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ a, d, t: url ? null : sesion.token, v: VERSION }), redirect: 'follow', signal: ctl.signal });
+    } catch (e) { throw new ErrorApi('RED', ctl.signal.aborted ? 'El servidor tardó demasiado en responder.' : 'No se pudo conectar con el servidor.'); }
+    finally { clearTimeout(reloj); }
+    let j; try { j = await res.json(); } catch { throw new ErrorApi('RED', 'El servidor respondió algo inesperado. Intenta de nuevo.'); }
+    if (!j.ok) {
+      if (j.e === 'OCUPADO' && intento < reintentos) {
+        const pausa = Math.round((600 * Math.pow(2, intento)) + Math.random() * 400);
+        await new Promise((r) => setTimeout(r, pausa));
+        continue;
+      }
+      if (j.e === 'SESION' && sesion.token && !url) { sesion.cerrar(false); alCaducar(); }
+      throw new ErrorApi(j.e, j.m);
+    }
+    return j.d;
+  }
 }
 export const reintentable = (e) => e && (e.cod === 'RED' || e.cod === 'OCUPADO');
-export const info = () => ({ equipo: equipo() });
+function dispositivoId() {
+  let id = guardado.leer(K.disp, '');
+  if (!id) { id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + '-' + Math.random().toString(36).slice(2)); guardado.poner(K.disp, id); }
+  return id;
+}
+export const info = () => ({ equipo: equipo(), dispositivoId: dispositivoId() });
 
 /* ---------- Reloj: corrige la hora del celular con la del servidor para las marcaciones sin señal ---------- */
 const naive = (iso) => { const p = /(\d+)-(\d+)-(\d+)T(\d+):(\d+)/.exec(iso); return p ? Date.UTC(+p[1], +p[2] - 1, +p[3], +p[4], +p[5]) : NaN; };
@@ -66,13 +81,48 @@ export const reloj = {
   ahora() { return new Date(Date.now() + (guardado.leer(K.desfase, 0) || 0)); }
 };
 
-/* ---------- Bandeja de salida: marcaciones hechas sin señal ---------- */
+/* ---------- Bandeja de salida: marcaciones hechas sin señal (IndexedDB con respaldo en memoria) ---------- */
 let enviando = null;
+let colaMem = guardado.leer(K.salida, []);
+const idb = (() => {
+  if (typeof indexedDB === 'undefined') return null;
+  let dbp = null;
+  const abrir = () => dbp || (dbp = new Promise((ok, mal) => {
+    const r = indexedDB.open('cj_offline', 1);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('salida')) r.result.createObjectStore('salida', { keyPath: 'id' }); };
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => mal(r.error);
+  }));
+  const tx = (modo, fn) => abrir().then((db) => new Promise((ok, mal) => {
+    const t = db.transaction('salida', modo), s = t.objectStore('salida'), req = fn(s);
+    t.oncomplete = () => ok(req && req.result);
+    t.onerror = () => mal(t.error);
+  })).catch(() => null);
+  return {
+    todo: () => tx('readonly', (s) => s.getAll()),
+    poner: (m) => tx('readwrite', (s) => s.put(m)),
+    borrar: (id) => tx('readwrite', (s) => s.delete(id)),
+    limpiar: () => tx('readwrite', (s) => s.clear())
+  };
+})();
+if (idb) {
+  idb.todo().then((rows) => {
+    if (Array.isArray(rows) && rows.length) {
+      const ids = new Set(rows.map((x) => x.id));
+      const extras = colaMem.filter((x) => !ids.has(x.id));
+      extras.forEach((x) => idb.poner(x));
+      colaMem = rows.concat(extras);
+    } else if (colaMem.length) {
+      colaMem.forEach((x) => idb.poner(x));
+    }
+    guardado.poner(K.salida, null); // libera cuota de localStorage tras migrar a IndexedDB
+  });
+}
 export const bandeja = {
-  lista: () => guardado.leer(K.salida, []),
+  lista: () => colaMem.slice(),
   rechazadas: () => guardado.leer(K.rech, []),
-  agregar(m) { const l = bandeja.lista(); l.push(m); guardado.poner(K.salida, l); },
-  quitar(id) { guardado.poner(K.salida, bandeja.lista().filter((m) => m.id !== id)); },   // relee la lista: no pisa lo que se agregó entretanto
+  agregar(m) { colaMem = colaMem.filter((x) => x.id !== m.id).concat(m); if (idb) idb.poner(m); else guardado.poner(K.salida, colaMem); },
+  quitar(id) { colaMem = colaMem.filter((m) => m.id !== id); if (idb) idb.borrar(id); else guardado.poner(K.salida, colaMem); },
   descartarRechazada(id) { guardado.poner(K.rech, bandeja.rechazadas().filter((m) => m.id !== id)); },
   enviar() {
     if (enviando) return enviando; // un solo envío a la vez

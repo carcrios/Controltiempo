@@ -85,7 +85,14 @@ function Principal({ alSalir }) {
   if (!yo) return <><Cabecera /><main className="contenido" id="contenido">{error ? <div className="pila"><Aviso tono="peligro">{error.message}</Aviso><Boton onClick={cargar}>Reintentar</Boton><Boton variante="texto" onClick={salir}>Cerrar sesión</Boton></div> : <div className="pila" role="status"><span className="oculto-visual">Cargando tu información…</span><div className="esqueleto" style={{ height: 260, borderRadius: 16 }} /><Esqueleto lineas={4} /></div>}</main></>;
   const u = yo.usuario, empresa = yo.cfg.empresa;
   const modo = modoSel || (u.rol === 'admin' && window.innerWidth > 900 ? 'admin' : 'yo'), esJefe = u.rol === 'admin' || u.rol === 'supervisor';
-  const actualizarApp = () => { const ir = () => location.reload(); (navigator.serviceWorker?.getRegistration() || Promise.resolve()).then((r) => r?.update()).then(ir, ir); };
+  const actualizarApp = () => {
+    const ir = () => location.reload();
+    if (!navigator.serviceWorker) return ir();
+    navigator.serviceWorker.getRegistration().then((r) => {
+      if (r?.waiting) { navigator.serviceWorker.addEventListener('controllerchange', ir, { once: true }); r.waiting.postMessage({ type: 'SKIP_WAITING' }); return; }
+      return r?.update().then(ir, ir);
+    }).catch(ir);
+  };
   if (u.consVersion !== yo.cfg.versionLegal) return <Reconsentir empresa={empresa} alListo={cargar} />;
   if (u.estado !== 'activo') return <><Cabecera empresa={empresa}><Boton variante="texto" chico icono={LogOut} onClick={salir}>Salir</Boton></Cabecera>
     <main className="acceso" id="contenido"><div className="acceso-caja pila"><h1>Tu registro está en revisión</h1><p className="suave">Hola {u.nombre.split(' ')[0]}. El administrador de {empresa.nombre} debe aprobar tu usuario antes de que puedas marcar. Cuando lo haga, toca “Revisar de nuevo”.</p><Boton onClick={() => cargar().then((d) => d && d.usuario.estado !== 'activo' && avisos.info('Aún no ha sido aprobado.'))}>Revisar de nuevo</Boton></div></main></>;

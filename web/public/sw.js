@@ -1,15 +1,15 @@
 // Service worker: deja la aplicación instalable y usable sin señal desde la primera visita.
 // La API (Apps Script) nunca se guarda en caché: las marcaciones sin señal las maneja la bandeja de salida de la app.
-const VERSION = 'jornada-v1.2.0';
+const VERSION = 'jornada-v1.4.0';
 const BASE = ['./', './config.js', './manifest.webmanifest', './icono-192.png'];
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
     const c = await caches.open(VERSION); await c.addAll(BASE);
     // Guarda también los archivos de la aplicación que nombra la página (llevan huella en el nombre).
     try { const html = await (await fetch('./', { cache: 'no-store' })).text(); const urls = [...html.matchAll(/(?:src|href)="(\.\/assets\/[^"]+)"/g)].map((m) => m[1]); await c.addAll(urls); } catch (x) { /* se guardarán al usarse */ }
-    await self.skipWaiting();
   })());
 });
+self.addEventListener('message', (e) => { if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting(); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== VERSION).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 const conLimite = (req, ms) => new Promise((ok, mal) => { const t = setTimeout(() => mal(new Error('lento')), ms); fetch(req).then((r) => { clearTimeout(t); ok(r); }, (x) => { clearTimeout(t); mal(x); }); });
 self.addEventListener('fetch', (e) => {
