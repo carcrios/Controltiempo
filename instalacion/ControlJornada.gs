@@ -1,4 +1,4 @@
-/* Control de jornada 1.6.0 — archivo único para pegar en Apps Script (Extensiones → Apps Script).
+/* Control de jornada 1.6.1 — archivo único para pegar en Apps Script (Extensiones → Apps Script).
    Generado por herramientas/empaquetar.js: no lo edites a mano. */
 
 // ===================== Motor.gs =====================
@@ -317,7 +317,7 @@ var Motor = (function () {
  * Base: acceso a datos, seguridad, configuración y enrutador de la API.
  * Una hoja de cálculo = una empresa. Nada de la empresa está escrito en el código: todo vive en la hoja Config.
  */
-var VERSION = '1.6.0';
+var VERSION = '1.6.1';
 // Página publicada (GitHub Pages) que usan tus clientes. Déjala escrita en la plantilla para que el instalador entregue el enlace listo.
 var APP_PREDETERMINADA = '';
 // Clave secreta del proveedor para firmar llaves de licencia por plan/módulos. Si está vacía, todos los módulos quedan activos (modo demostración).
@@ -592,11 +592,16 @@ function moduloActivo_(mod) { return !mod || licenciaEfectiva_().modulos.indexOf
 var ACCIONES = {}; // nombre -> {fn, rol: 'publico' | 'usuario' | 'admin', escribe, modulo}
 function accion_(nombre, rol, escribe, fn, modulo) { ACCIONES[nombre] = { fn: fn, rol: rol, escribe: escribe, modulo: modulo || '' }; }
 
+var ACCIONES_SIEMPRE = { publico: 1, consultarCedula: 1, login: 1, salir: 1, yo: 1, adminLicenciaActivar: 1 };
 function despachar_(req) {
   _c = {}; _cfg = null;
   if (!ACCIONES.publico) registrarAcciones_();
   var a = ACCIONES[req && req.a];
   if (!a) throw E_('ACCION', 'Acción desconocida.');
+  if (CLAVE_LICENCIA_PROVEEDOR && !ACCIONES_SIEMPRE[req.a]) {
+    var lic = licenciaEfectiva_();
+    if (lic.vencida) throw E_('LICENCIA_VENCIDA', 'La suscripción de esta empresa está vencida. Renueva tu plan e ingresa la nueva llave de licencia para continuar.');
+  }
   if (a.modulo && !moduloActivo_(a.modulo)) throw E_('MODULO_NO_INCLUIDO', 'El módulo "' + a.modulo + '" no está incluido en tu plan actual.');
   var lock = null;
   if (a.escribe) { lock = LockService.getScriptLock(); if (!lock.tryLock(25000)) throw E_('OCUPADO', 'El sistema está ocupado. Intenta de nuevo en unos segundos.'); }
