@@ -9,6 +9,9 @@ export const horasDec = (h) => (Math.round((h || 0) * 10) / 10).toLocaleString('
 const may = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 export const fechaLarga = (iso) => may(new Date(iso.slice(0, 10) + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' }));
 export const fechaCorta = (iso) => iso ? may(new Date(iso.slice(0, 10) + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' })) : '';
+// Para documentos que se imprimen o firman: siempre con año ("10 de marzo de 2025")
+export const fechaDoc = (iso) => iso ? new Date(iso.slice(0, 10) + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+export const saludo = (d = new Date()) => { const h = d.getHours(); return h >= 5 && h < 12 ? 'Buenos días' : h >= 12 && h < 19 ? 'Buenas tardes' : 'Buenas noches'; };
 export const fechaHora = (iso) => iso ? `${fechaCorta(iso)}, ${iso.slice(11, 16)}` : '';
 export const aMin = (hhmm) => { if (!hhmm) return null; const [h, m] = hhmm.split(':'); return +h * 60 + +m; };
 export const TIPOS = ['entrada', 'sal_alm', 'ent_alm', 'salida'];

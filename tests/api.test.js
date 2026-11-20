@@ -113,9 +113,10 @@ t('bloquear GPS o cámara genera alerta', () => { sinError(api('bloqueo', { que:
 hora('2026-11-11', '16:40');
 t('fuera del centro: alerta; con geocerca estricta no deja marcar', () => {
   sinError(api('adminConfigGuardar', { geocercaEstricta: true }, adm));
-  falla(api('marcar', { tipo: 'salida', lat: 4.70, lng: -74.05, prec: 10 }, tr), 'FUERA_ZONA');
+  falla(api('marcar', { tipo: 'salida', lat: 4.70, lng: -74.05, prec: 10, foto: FOTO }, tr), 'FUERA_ZONA');
   sinError(api('adminConfigGuardar', { geocercaEstricta: false }, adm));
-  eq(sinError(api('marcar', { tipo: 'salida', lat: 4.70, lng: -74.05, prec: 10 }, tr)).enZona, '0');
+  falla(api('marcar', { tipo: 'salida', lat: 4.70, lng: -74.05, prec: 10 }, tr), 'FOTO_REQUERIDA'); // fuera de zona exige foto
+  eq(sinError(api('marcar', { tipo: 'salida', lat: 4.70, lng: -74.05, prec: 10, foto: FOTO }, tr)).enZona, '0');
   assert(S.leer('Alertas').some(a => a.tipo === 'fuera_zona'));
 });
 
@@ -189,7 +190,7 @@ t('permiso sin respuesta vence al cumplirse el límite configurado', () => {
   hora('2026-11-12', '10:30'); S.tareaCada5();
   eq(sinError(api('permisosMios', {}, tr)).find(x => x.id === p.id).estado, 'vencido'); assert(S.leer('Alertas').some(a => a.tipo === 'permiso_vencido'));
 });
-t('vacaciones: saldo causado según fecha de ingreso', () => eq(sinError(api('yo', {}, tr)).vacaciones.causadas, 15.1));
+t('vacaciones: saldo causado según fecha de ingreso', () => eq(sinError(api('yo', {}, tr)).vacaciones.causadas, 15.2));
 
 /* ---- Incapacidades, ausencias, tablero ---- */
 t('incapacidad registrada por el administrador (sin diagnóstico)', () => {
@@ -275,7 +276,8 @@ t('recuperar contraseña: código al correo registrado, de un solo uso y con int
   const n = X.correos.length, r = sinError(api('recuperarPedir', { cedula: '1020333444' })); assert(r.enviado); eq(r.pista, 'pe***@correo.co');
   const cod = /código es: (\d{6})/.exec(X.correos.slice(n).pop().body)[1];
   falla(api('recuperarCambiar', { cedula: '1020333444', codigo: '000000', clave: 'nueva2026' }), 'CODIGO');
-  const tk = sinError(api('recuperarCambiar', { cedula: '1020333444', codigo: cod, clave: 'nueva2026' })).token; tr = tk;
+  const rc = sinError(api('recuperarCambiar', { cedula: '1020333444', codigo: cod, clave: 'nueva2026' })); assert(!rc.token, 'la recuperación no debe entregar sesión');
+  const tk = sinError(api('login', { cedula: '1020333444', clave: 'nueva2026' })).token; tr = tk;
   falla(api('recuperarCambiar', { cedula: '1020333444', codigo: cod, clave: 'otra20267' }), 'CODIGO');
   falla(api('login', { cedula: '1020333444', clave: 'pedro2026' }), 'CREDENCIALES'); sinError(api('login', { cedula: '1020333444', clave: 'nueva2026' }));
   eq(sinError(api('recuperarPedir', { cedula: '99999999' })).enviado, false);

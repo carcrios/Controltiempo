@@ -61,7 +61,7 @@ function tarea_(nombre, fn) {
   _c = {}; _cfg = null;
   var lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) return;
   try { fn(); } catch (e) { registrarError_('tarea:' + nombre, e); try { alertar_('error_sistema', '', 'Falló la tarea programada "' + nombre + '": ' + e.message); } catch (x) { } }
-  finally { lock.releaseLock(); }
+  finally { lock.releaseLock(); try { enviarTelegram_(); } catch (e) { } }
 }
 function unaVez_(clave, seg) { var c = CacheService.getScriptCache(); if (c.get(clave)) return false; c.put(clave, '1', seg || 21600); return true; }
 function lista_(clave, fecha) { var v = json_(prop_(clave), {}); return v.f === fecha ? v : { f: fecha, l: [] }; }
@@ -127,7 +127,9 @@ function tareaCada15() { tarea_('cada15', function () {
 function enviarResumenAlertas_() {
   var pend = leer('Alertas').filter(function (x) { return x.estado === 'pendiente_resumen'; });
   if (!pend.length) return;
-  var porCorreo = {}, nombres = {};
+  var porCorreo = {}, nombres = {}, cuenta = {};
+  pend.forEach(function (x) { var k = TIPOS_ALERTA[x.tipo] || x.tipo; cuenta[k] = (cuenta[k] || 0) + 1; });
+  telegram_('Resumen de alertas: ' + Object.keys(cuenta).map(function (k) { return k + ' (' + cuenta[k] + ')'; }).join(', ') + '. Detalle en el panel, sección Sistema.');
   leer('Usuarios').forEach(function (u) { nombres[u.cedula] = u.nombre; });
   pend.forEach(function (x) {
     var dest = x.enviadoA || cfg_().correoAlertas; if (!dest) return;
@@ -212,12 +214,16 @@ function archivarHistorico_() {
     var f = String(v[i][iF]).substr(0, 10);
     if (f && f < lim && periodoCerrado_(f)) mover.push(v[i]); else conservar.push(v[i]);
   }
+  // Al histórico solo pasa lo que sirve como soporte de nómina: sin ubicación ni foto (minimización, Ley 1581 art. 4)
+  ['lat', 'lng', 'prec', 'dist', 'foto'].forEach(function (k) { var ix = cols.indexOf(k); mover.forEach(function (r) { r[ix] = ''; }); });
+  var iM = cols.indexOf('motivo'); mover.forEach(function (r) { if (r[iM]) r[iM] = '[motivo no archivado]'; }); // texto libre: puede tener datos de salud
   if (mover.length < 100) return;
   try {
-    var carpeta = DriveApp.getFolderById(prop_('CARPETA_RESPALDOS'));
+    if (!prop_('CARPETA_HISTORICO')) { var pr = DriveApp.getFileById(ss_().getId()).getParents(), pd = pr.hasNext() ? pr.next() : DriveApp.getRootFolder(); prop_('CARPETA_HISTORICO', pd.createFolder('Control de jornada - Histórico (no borrar)').getId()); }
+    var carpeta = DriveApp.getFolderById(prop_('CARPETA_HISTORICO')); // fuera de la carpeta de respaldos: la rotación de copias no lo toca
     var nombre = 'Histórico Marcaciones ' + a.fecha.substr(0, 4) + ' - ' + c.empresa.nombre;
-    var it = carpeta.getFilesByName(nombre), archSs = it.hasNext() ? SpreadsheetApp.openById(it.next().getId()) : SpreadsheetApp.create(nombre);
-    if (!it.hasNext()) { try { DriveApp.getFileById(archSs.getId()).moveTo(carpeta); } catch (e) { } }
+    var it = carpeta.getFilesByName(nombre), existe = it.hasNext(), archSs = existe ? SpreadsheetApp.openById(it.next().getId()) : SpreadsheetApp.create(nombre);
+    if (!existe) { try { DriveApp.getFileById(archSs.getId()).moveTo(carpeta); } catch (e) { } }
     var ah = archSs.getSheetByName('Marcaciones') || archSs.insertSheet('Marcaciones');
     if (ah.getLastRow() === 0) ah.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight('bold');
     ah.getRange(ah.getLastRow() + 1, 1, mover.length, cols.length).setValues(mover);

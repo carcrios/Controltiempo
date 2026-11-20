@@ -1,5 +1,6 @@
 // Componentes base. Todos consumen los tokens de estilos.css y comparten estados:
 // reposo, hover, foco visible, presionado, deshabilitado, cargando, error y vacío.
+import { BotonDictar, dictadoDisponible, hablar } from './a11y.jsx';
 import React, { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { BottomSheet, FluidTabs } from '@elizabthpazp/intera-ui';
 import { AlertTriangle, ArrowDown, ArrowUp, CheckCircle2, ChevronLeft, ChevronRight, Info, Search, WifiOff, X } from 'lucide-react';
@@ -26,13 +27,19 @@ export function Boton({ variante = 'primario', cargando, icono: Icono, chico, an
   </button>;
 }
 
-export function Campo({ etiqueta, ayuda, error, como = 'input', opciones, children, className = '', ...p }) {
+const TIPOS_DICTABLES = ['text', 'search', 'email', 'tel', 'url'];
+export function Campo({ etiqueta, ayuda, error, como = 'input', opciones, children, className = '', sinDictado, ...p }) {
   const id = useId(), desc = [ayuda && id + 'a', error && id + 'e'].filter(Boolean).join(' ') || undefined;
   const comun = { id, className: 'entrada', 'aria-invalid': error ? 'true' : undefined, 'aria-describedby': desc, ...p };
+  // Dictado por voz en las casillas de texto (no en contraseñas, fechas, horas, archivos ni listas)
+  const dictable = !sinDictado && dictadoDisponible && typeof p.onChange === 'function' && !p.disabled && !p.readOnly && p.value !== undefined
+    && (como === 'textarea' || (como === 'input' && TIPOS_DICTABLES.includes(p.type || 'text')));
+  const dictar = (v) => { let x = v; if (p.maxLength) x = x.slice(0, p.maxLength); p.onChange({ target: { value: x, name: p.name, type: p.type || 'text' }, currentTarget: { value: x } }); };
+  const control = como === 'select' ? <select {...comun}>{opciones ? opciones.map((o) => <option key={o.v} value={o.v}>{o.t}</option>) : children}</select>
+    : como === 'textarea' ? <textarea {...comun} /> : <input {...comun} />;
   return <div className={`campo ${className}`}>
     <label htmlFor={id}>{etiqueta}{p.required && <span aria-hidden="true"> *</span>}</label>
-    {como === 'select' ? <select {...comun}>{opciones ? opciones.map((o) => <option key={o.v} value={o.v}>{o.t}</option>) : children}</select>
-      : como === 'textarea' ? <textarea {...comun} /> : <input {...comun} />}
+    {dictable ? <div className={`con-voz ${como === 'textarea' ? 'area' : ''}`}>{control}<BotonDictar valor={p.value} alCambiar={dictar} etiqueta={typeof etiqueta === 'string' ? etiqueta.toLowerCase() : ''} numerico={p.inputMode === 'numeric' || p.type === 'tel'} /></div> : control}
     {ayuda && <span className="ayuda" id={id + 'a'}>{ayuda}</span>}
     {error && <span className="error" id={id + 'e'} role="alert">{error}</span>}
   </div>;
@@ -74,7 +81,7 @@ export function Avisos({ children }) {
   const [l, setL] = useState([]);
   const quitar = useCallback((id) => setL((x) => x.filter((a) => a.id !== id)), []);
   const api = useMemo(() => {
-    const poner = (tono, texto, ms) => { const id = Math.random(); setL((x) => [...x.slice(-2), { id, tono, texto }]); setTimeout(() => quitar(id), ms || (tono === 'error' ? 9000 : 4500)); };
+    const poner = (tono, texto, ms) => { const id = Math.random(); hablar(texto); setL((x) => [...x.slice(-2), { id, tono, texto }]); setTimeout(() => quitar(id), ms || (tono === 'error' ? 9000 : 4500)); };
     return { ok: (t, ms) => poner('ok', t, ms), error: (t, ms) => poner('error', t?.message || t, ms), info: (t, ms) => poner('', t, ms) };
   }, [quitar]);
   return <CtxAvisos.Provider value={api}>{children}
@@ -119,7 +126,7 @@ export function Tabla({ columnas, filas, clave = (f, i) => i, buscar = true, por
   const paginas = Math.max(1, Math.ceil(lista.length / porPagina)), p = Math.min(pag, paginas - 1), vis = lista.slice(p * porPagina, (p + 1) * porPagina);
   return <div className="pila junta">
     {(buscar || extra) && <div className="fila">{buscar && <div className="crece" style={{ position: 'relative', minWidth: 180 }}><Search size={18} aria-hidden="true" style={{ position: 'absolute', left: 12, top: 15, color: 'var(--c-texto-2)' }} />
-      <input className="entrada" style={{ paddingLeft: 38 }} type="search" placeholder="Buscar…" aria-label="Buscar en la tabla" value={q} onChange={(e) => { setQ(e.target.value); setPag(0); }} /></div>}{extra}</div>}
+      <div className="con-voz"><input className="entrada" style={{ paddingLeft: 38 }} type="search" placeholder="Buscar…" aria-label="Buscar en la tabla" value={q} onChange={(e) => { setQ(e.target.value); setPag(0); }} /><BotonDictar valor={q} alCambiar={(v) => { setQ(v); setPag(0); }} etiqueta="la búsqueda" /></div></div>}{extra}</div>}
     <div className="tabla-caja">
       {vis.length === 0 ? <Vacio titulo={q ? 'Sin coincidencias' : 'Nada por aquí'}>{q ? `Ningún registro contiene “${q}”.` : vacio}</Vacio> :
         <table className="tabla apilable"><thead><tr>{columnas.map((c) => <th key={c.k} scope="col" className={c.num ? 'derecha' : ''} aria-sort={orden?.k === c.k ? (orden.d > 0 ? 'ascending' : 'descending') : undefined}>

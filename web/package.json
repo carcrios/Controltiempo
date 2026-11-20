@@ -1,7 +1,7 @@
 {
   "name": "control-jornada",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,12 +14,14 @@
     "@fontsource-variable/public-sans": "5.2.5",
     "framer-motion": "11.18.2",
     "lucide-react": "0.468.0",
+    "qrcode": "1.5.4",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "xlsx": "0.18.5"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "4.3.4",
-    "vite": "5.4.11"
+    "vite": "5.4.11",
+    "vite-plugin-singlefile": "^2.0.3"
   }
 }

@@ -1,3 +1,4 @@
+import { BotonDictar } from './a11y.jsx';
 import React, { useEffect, useState } from 'react';
 import { CalendarCheck, Check, Download, Lock, MessageCircle, Pencil, Plus, RefreshCw, Save, Stethoscope, Timer, X, DatabaseBackup, FileText, CheckCheck, Trash2 } from 'lucide-react';
 import { api, VERSION } from './api.js';
@@ -6,6 +7,7 @@ import { comprimirArchivo, fechaCorta, fechaHora, horas, horasDec, hoyISO, pesos
 import { DetallePermiso, nombreEstado, tonoPermiso } from './Firma.jsx';
 import { Desprendible, Liquidacion, enlaceWhatsApp, textoPermiso } from './Trabajador.jsx';
 import { Rango, Titulo, aExcel, periodoActual, useAccion } from './Admin.jsx';
+import { LiquidacionContrato, Licencia, Presupuesto, Provisiones } from './Modulos.jsx';
 
 /* ---------- Permisos ---------- */
 export function Permisos({ soloVer }) {
@@ -20,6 +22,7 @@ export function Permisos({ soloVer }) {
       { k: 'fechaSalida', t: 'Sale', render: (p) => `${fechaCorta(p.fechaSalida)} ${p.horaSalida}` }, { k: 'fechaRegreso', t: 'Regresa', render: (p) => `${fechaCorta(p.fechaRegreso)} ${p.horaRegreso}` },
       { k: 'firmas', t: 'Firmas', orden: false, render: (p) => p.firmas.length ? `${p.firmas.filter((f) => f.estado === 'aprobado').length} de ${p.firmas.length}` : '—' },
       { k: 'estado', t: 'Estado', render: (p) => <Insignia tono={tonoPermiso[p.estado]}>{nombreEstado[p.estado]}</Insignia>, texto: (p) => nombreEstado[p.estado] },
+      { k: 'salidaReal', t: 'Uso real', render: (p) => p.salidaReal ? <span className="chico">Salió {p.salidaReal.slice(11, 16)}{p.regresoReal ? ` · regresó ${p.regresoReal.slice(11, 16)}` : ''}</span> : '', texto: (p) => p.salidaReal ? `Salió ${p.salidaReal.slice(11, 16)}${p.regresoReal ? ` regresó ${p.regresoReal.slice(11, 16)}` : ''}` : '' },
       { k: 'a', t: '', acciones: true, orden: false, render: (p) => <Boton chico variante={!soloVer && ['firmado', 'vencido'].includes(p.estado) ? 'primario' : 'secundario'} onClick={() => abrir(p)}>{!soloVer && ['firmado', 'vencido'].includes(p.estado) ? 'Decidir' : 'Ver'}</Boton> }]}
       filas={l.filter((p) => filtro === 'todos' || (filtro === 'pendientes' ? ['firmado', 'vencido'].includes(p.estado) : p.estado === 'en_firmas'))} clave={(p) => p.id}
       vacio={filtro === 'pendientes' ? 'No hay permisos esperando tu decisión.' : 'No hay permisos en esta lista.'} />}</Estado>
@@ -57,10 +60,11 @@ function RegistrarPermiso({ abierta, alCerrar, alListo }) {
 }
 
 /* ---------- Horas extra ---------- */
-export function Extras() {
+export function Extras({ modulos = {}, cfg = {} }) {
+  const [comp, setComp] = useState(false), [soporteComp, setSoporteComp] = useState('');
   const [filtro, setFiltro] = useState('pendiente'), carga = useCarga(() => api('adminExtras', { estado: filtro === 'todas' ? '' : filtro }), [filtro]), [sel, setSel] = useState(null), [min, setMin] = useState(0), [obs, setObs] = useState(''), [tope, setTope] = useState(false), [correr, ocupado] = useAccion();
   const abrir = (x) => { setSel(x); setMin(Math.min(x.minCalc, x.superaDia ? 120 : x.minCalc)); setObs(''); setTope(false); };
-  const decidir = async (decision) => { if (await correr(() => api('adminExtraDecidir', { id: sel.id, decision, min, obs, confirmaTope: tope }), decision === 'aprobar' ? 'Horas extra aprobadas.' : 'Horas extra rechazadas.')) { setSel(null); carga.recargar(true); } };
+  const decidir = async (decision) => { if (await correr(() => api('adminExtraDecidir', { id: sel.id, decision, min, obs, confirmaTope: tope, aCompensatorio: comp, soporte: comp ? soporteComp : undefined }), decision === 'aprobar' ? 'Horas extra aprobadas.' : 'Horas extra rechazadas.')) { setSel(null); carga.recargar(true); } };
   return <><Titulo t="Horas extra">La aplicación calcula el tiempo trabajado por encima de la jornada. Solo lo que apruebes aquí entra a la nómina.</Titulo>
     <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Filtro de horas extra" valor={filtro} alCambiar={setFiltro} opciones={[{ v: 'pendiente', t: 'Por aprobar' }, { v: 'aprobada', t: 'Aprobadas' }, { v: 'rechazada', t: 'Rechazadas' }, { v: 'todas', t: 'Todas' }]} /></div>
     <Estado carga={carga}>{(l) => { const lote = l.filter((x) => x.estado === 'pendiente' && !x.superaDia && !x.cerrado); return <div className="pila">
@@ -76,6 +80,8 @@ export function Extras() {
     <Hoja abierta={!!sel} alCerrar={() => setSel(null)} titulo="Aprobar horas extra" alto={0.75}>{sel && <>
       <p><strong>{sel.nombre}</strong> · {fechaCorta(sel.fecha)}. Tiempo extra calculado: <strong className="num">{horas(sel.minCalc)}</strong>.</p>
       <Campo etiqueta="Minutos que apruebas" type="number" min="1" max={sel.minCalc} value={min} onChange={(e) => setMin(+e.target.value)} ayuda={`Equivale a ${horas(min)}. Máximo ${sel.minCalc} min.`} />
+      {modulos.nomina && cfg.compensarExtras && <Casilla checked={comp} onChange={(e) => setComp(e.target.checked)}>Abonarlas al banco de compensatorios en vez de pagarlas. Se abonan con su recargo (2 h extra diurnas = 2,5 h de descanso). Escribe en la observación el acuerdo firmado con el trabajador.</Casilla>}
+      {comp && <div className="campo"><label htmlFor="sopx">Foto del acuerdo firmado</label><input id="sopx" className="entrada" style={{ paddingTop: 10 }} type="file" accept="image/*" onChange={async (e) => { const f0 = e.target.files[0]; setSoporteComp(f0 ? await comprimirArchivo(f0) : ''); }} /></div>}
       {min > 120 && <><Aviso tono="peligro">Supera el máximo legal de <strong>2 horas extra por día</strong> (y 12 por semana). Solo procede con autorización del Ministerio del Trabajo o en las excepciones de ley.</Aviso>
         <Casilla checked={tope} onChange={(e) => setTope(e.target.checked)}>Confirmo que la empresa cuenta con el soporte para superar el tope. Queda registrado con mi usuario.</Casilla></>}
       <Campo etiqueta="Observación" value={obs} onChange={(e) => setObs(e.target.value)} maxLength={200} />
@@ -85,13 +91,14 @@ export function Extras() {
 /* ---------- Incapacidades ---------- */
 const TIPO_INC = { general: 'Enfermedad general', laboral: 'Accidente o enfermedad laboral', maternidad: 'Licencia de maternidad', paternidad: 'Licencia de paternidad' };
 export function Incapacidades() {
+  const [edit, setEdit] = useState(null);
   const carga = useCarga(() => api('adminIncapacidades'), []), personas = useCarga(() => api('adminPersonal'), []), [nuevo, setNuevo] = useState(false), [borrar, setBorrar] = useState(null), [f, campo, setF] = useForm({}), [soporte, setSoporte] = useState(''), [correr, ocupado] = useAccion(), avisos = useAvisos();
   const abrir = () => { setF({ cedula: '', tipo: 'general', desde: hoyISO(), hasta: hoyISO(), entidad: '', nota: '' }); setSoporte(''); setNuevo(true); };
   const guardar = async () => { if (await correr(() => api('adminIncapacidadGuardar', { ...f, soporte }), 'Incapacidad registrada.')) { setNuevo(false); carga.recargar(true); } };
   const eliminar = async () => { if (await correr(() => api('adminIncapacidadGuardar', { ...borrar, borrar: true }), 'Incapacidad eliminada.')) { setBorrar(null); carga.recargar(true); } };
   return <><Titulo t="Incapacidades" accion={<Boton icono={Plus} onClick={abrir}>Registrar incapacidad</Boton>}>Los días de incapacidad no cuentan como ausencia y se liquidan según su tipo. No se guarda el diagnóstico.</Titulo>
     <Estado carga={carga}>{(l) => <Tabla columnas={[{ k: 'nombre', t: 'Persona', render: (i) => <strong>{i.nombre}</strong> }, { k: 'tipo', t: 'Tipo', render: (i) => TIPO_INC[i.tipo], texto: (i) => TIPO_INC[i.tipo] }, { k: 'desde', t: 'Desde', render: (i) => fechaCorta(i.desde) }, { k: 'hasta', t: 'Hasta', render: (i) => fechaCorta(i.hasta) }, { k: 'dias', t: 'Días', num: true }, { k: 'entidad', t: 'Entidad' },
-      { k: 'a', t: '', acciones: true, orden: false, render: (i) => <Boton chico variante="texto" onClick={() => setBorrar(i)}>Eliminar</Boton> }]} filas={l} clave={(i) => i.id} vacio="No hay incapacidades registradas." />}</Estado>
+      { k: 'a', t: '', acciones: true, orden: false, render: (i) => <span className="fila fin" style={{ gap: 4 }}><Boton chico variante="secundario" icono={Pencil} onClick={() => setEdit({ id: i.id, tipo: i.tipo, desde: i.desde, hasta: i.hasta, entidad: i.entidad || '', nota: i.nota || '', nombre: i.nombre })}>Editar</Boton><Boton chico variante="texto" onClick={() => setBorrar(i)}>Eliminar</Boton></span> }]} filas={l} clave={(i) => i.id} vacio="No hay incapacidades registradas." />}</Estado>
     <Hoja abierta={nuevo} alCerrar={() => setNuevo(false)} titulo="Registrar incapacidad">
       <Campo como="select" etiqueta="Persona" {...campo('cedula')}><option value="">Elige…</option>{(personas.datos || []).filter((u) => u.estado !== 'inactivo').map((u) => <option key={u.cedula} value={u.cedula}>{u.nombre}</option>)}</Campo>
       <Campo como="select" etiqueta="Tipo" opciones={Object.keys(TIPO_INC).map((k) => ({ v: k, t: TIPO_INC[k] }))} {...campo('tipo')} />
@@ -101,7 +108,11 @@ export function Incapacidades() {
       <div className="campo"><label htmlFor="sinc">Soporte (foto del certificado, opcional)</label><input id="sinc" className="entrada" style={{ paddingTop: 10 }} type="file" accept="image/*" onChange={async (e) => { const a = e.target.files[0]; if (!a) return setSoporte(''); try { setSoporte(await comprimirArchivo(a)); } catch (x) { avisos.error(x); } }} /></div>
       <div className="acciones-hoja"><Boton variante="secundario" onClick={() => setNuevo(false)}>Cancelar</Boton><Boton cargando={ocupado} disabled={!f.cedula} onClick={guardar}>Registrar</Boton></div>
     </Hoja>
-    <Confirmar abierta={!!borrar} titulo="Eliminar incapacidad" texto="Eliminar" variante="peligro" cargando={ocupado} alCerrar={() => setBorrar(null)} alConfirmar={eliminar}>Los días volverán a contarse como ausencia si la persona no marcó.</Confirmar></>;
+    <Confirmar abierta={!!borrar} titulo="Eliminar incapacidad" texto="Eliminar" variante="peligro" cargando={ocupado} alCerrar={() => setBorrar(null)} alConfirmar={eliminar}>Los días volverán a contarse como ausencia si la persona no marcó.</Confirmar><Hoja abierta={!!edit} alCerrar={() => setEdit(null)} titulo={edit ? `Editar incapacidad · ${edit.nombre}` : ''}>{edit && <>
+      <Campo como="select" etiqueta="Tipo" value={edit.tipo} onChange={(e) => setEdit({ ...edit, tipo: e.target.value })} opciones={Object.keys(TIPO_INC).map((k) => ({ v: k, t: TIPO_INC[k] }))} />
+      <div className="rejilla"><Campo etiqueta="Desde" type="date" value={edit.desde} onChange={(e) => setEdit({ ...edit, desde: e.target.value })} /><Campo etiqueta="Hasta (incluido)" type="date" min={edit.desde} ayuda="Para una prórroga, extiende esta fecha." value={edit.hasta} onChange={(e) => setEdit({ ...edit, hasta: e.target.value })} /></div>
+      <Campo etiqueta="Entidad" value={edit.entidad} onChange={(e) => setEdit({ ...edit, entidad: e.target.value })} /><Campo etiqueta="Nota interna" value={edit.nota} onChange={(e) => setEdit({ ...edit, nota: e.target.value })} />
+      <div className="acciones-hoja"><Boton variante="secundario" onClick={() => setEdit(null)}>Cancelar</Boton><Boton cargando={ocupado} onClick={async () => { if (await correr(() => api('adminIncapacidadEditar', edit), 'Incapacidad actualizada.')) { setEdit(null); carga.recargar(true); } }}>Guardar</Boton></div></>}</Hoja></>;
 }
 
 /* ---------- Archivos planos (CSV) para software contable y pago masivo ---------- */
@@ -122,15 +133,15 @@ export async function planoPagos(lista, p) {
 }
 
 /* ---------- Nómina ---------- */
-export function Nomina({ cfg }) {
+export function Nomina({ cfg, modulos = {} }) {
   const [tab, setTab] = useState('previa'), [r, setR] = useState(() => periodoActual(cfg.periodoNomina)), previa = useCarga(() => api('adminNominaPrevia', r, { espera: 120000 }), [r.desde, r.hasta]), cerradas = useCarga(() => api('adminNominas'), [tab]);
   const [sel, setSel] = useState(null), [cerrar, setCerrar] = useState(false), [det, setDet] = useState(null), [desp, setDesp] = useState(null), [correr, ocupado] = useAccion();
   const hacerCierre = async () => { if (await correr(() => api('adminNominaCerrar', r, { espera: 180000 }), 'Periodo cerrado: los desprendibles ya están disponibles para cada trabajador.')) { setCerrar(false); previa.recargar(); setTab('cerradas'); } };
   const verCerrada = async (p) => { const l = await correr(() => api('adminNominaDetalle', p)); if (l) setDet({ p, l }); };
   if (desp) return <Desprendible n={desp} alVolver={() => setDesp(null)} />;
   return <><Titulo t="Nómina y desprendibles">Liquidación estimada con la normativa vigente. Al cerrar el periodo se generan los desprendibles y ese periodo queda congelado.</Titulo>
-    <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Vista de nómina" valor={tab} alCambiar={(v) => { setTab(v); setDet(null); }} opciones={[{ v: 'previa', t: 'Periodo por liquidar' }, { v: 'novedades', t: 'Bonos y descuentos' }, { v: 'cerradas', t: 'Periodos cerrados' }]} /></div>
-    {tab === 'novedades' ? <NovedadesPago r={r} setR={setR} alCambiar={() => previa.recargar(true)} /> : tab === 'previa' ? <>
+    <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Vista de nómina" valor={tab} alCambiar={(v) => { setTab(v); setDet(null); }} opciones={[{ v: 'previa', t: 'Periodo por liquidar' }, { v: 'novedades', t: 'Bonos y descuentos' }, { v: 'cerradas', t: 'Periodos cerrados' }].concat(modulos.nomina ? [{ v: 'provisiones', t: 'Provisiones' }, { v: 'liquidacion', t: 'Liquidación de contrato' }] : [])} /></div>
+    {tab === 'provisiones' ? <Provisiones cfg={cfg} /> : tab === 'liquidacion' ? <LiquidacionContrato /> : tab === 'novedades' ? <NovedadesPago r={r} setR={setR} alCambiar={() => previa.recargar(true)} /> : tab === 'previa' ? <>
       <div className="fila entre" style={{ marginBottom: 16, alignItems: 'flex-end' }}><Rango r={r} setR={setR} />
         <Boton icono={Lock} disabled={!previa.datos || previa.datos.cerrado || r.hasta >= hoyISO()} onClick={() => setCerrar(true)}>Cerrar periodo</Boton></div>
       <Estado carga={previa} lineas={8}>{(d) => <div className="pila">
@@ -181,7 +192,7 @@ function NovedadesPago({ r, setR, alCambiar }) {
 function SelectorPersonas({ personas, sel, setSel }) {
   const [q, setQ] = useState(''), vis = personas.filter((u) => !q || (u.nombre + ' ' + u.cedula).toLowerCase().includes(q.toLowerCase()));
   return <fieldset style={{ border: 0, padding: 0, margin: 0 }} className="pila junta"><legend className="etiqueta">Personas ({sel.length} elegidas)</legend>
-    <div className="fila"><input className="entrada crece" type="search" placeholder="Buscar por nombre o cédula" aria-label="Buscar persona" value={q} onChange={(e) => setQ(e.target.value)} /><Boton chico variante="secundario" onClick={() => setSel(sel.length === vis.length ? [] : vis.map((u) => u.cedula))}>{sel.length === vis.length && vis.length ? 'Ninguna' : 'Todas'}</Boton></div>
+    <div className="fila"><BotonDictar valor={q} alCambiar={setQ} etiqueta="la búsqueda" /><input className="entrada crece" type="search" placeholder="Buscar por nombre o cédula" aria-label="Buscar persona" value={q} onChange={(e) => setQ(e.target.value)} /><Boton chico variante="secundario" onClick={() => setSel(sel.length === vis.length ? [] : vis.map((u) => u.cedula))}>{sel.length === vis.length && vis.length ? 'Ninguna' : 'Todas'}</Boton></div>
     <div style={{ maxHeight: 220, overflowY: 'auto', border: '1px solid var(--c-borde)', borderRadius: 'var(--r-2)', padding: 8 }} className="pila junta">{vis.map((u) => <label key={u.cedula} className="fila" style={{ flexWrap: 'nowrap', minHeight: 36 }}><input type="checkbox" style={{ width: 20, height: 20, accentColor: 'var(--c-primario)' }} checked={sel.includes(u.cedula)} onChange={(e) => setSel(e.target.checked ? [...sel, u.cedula] : sel.filter((c) => c !== u.cedula))} /><span>{u.nombre}</span></label>)}{vis.length === 0 && <span className="suave chico">Sin coincidencias.</span>}</div></fieldset>;
 }
 
@@ -215,20 +226,22 @@ export function Turnos() {
 }
 
 /* ---------- Resumen por obra + exportación general ---------- */
-export function Obras({ cfg }) {
+export function Obras({ cfg, modulos = {} }) {
+  const [vistaO, setVistaO] = useState('resumen');
   const [r, setR] = useState(() => periodoActual(cfg.periodoNomina)), carga = useCarga(() => api('adminResumenObra', r, { espera: 120000 }), [r.desde, r.hasta]), [correr, ocupado] = useAccion();
   const exportar = () => correr(async () => { const d = await api('adminExportar', r, { espera: 180000 }), { desde, hasta, empresa, ...hojas } = d; await aExcel(hojas, `jornada-${desde}-a-${hasta}.xlsx`); }, 'Archivo de Excel descargado.');
   return <><Titulo t="Resumen por obra" accion={<Boton icono={Download} cargando={ocupado} onClick={exportar}>Descargar todo a Excel</Boton>}>Horas, novedades y costo por centro de trabajo. El Excel trae personal, jornadas, extras, permisos, incapacidades, nómina y este resumen.</Titulo>
     <div style={{ marginBottom: 16 }}><Rango r={r} setR={setR} /></div>
-    <Estado carga={carga}>{(d) => <Tabla buscar={false} columnas={[{ k: 'centro', t: 'Centro de trabajo', render: (o) => <strong>{o.centro}</strong> }, { k: 'personas', t: 'Personas', num: true }, { k: 'dias', t: 'Días-persona', num: true }, { k: 'horas', t: 'Horas', num: true, render: (o) => horasDec(o.horas) }, { k: 'extras', t: 'Extra', num: true, render: (o) => horasDec(o.extras) }, { k: 'tardanzas', t: 'Tardanzas', num: true }, { k: 'ausencias', t: 'Ausencias', num: true }, { k: 'costo', t: 'Costo devengado', num: true, render: (o) => pesos(o.costo) }]}
+    {modulos.presupuesto && <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Vista" valor={vistaO} alCambiar={setVistaO} opciones={[{ v: 'resumen', t: 'Resumen' }, { v: 'presupuesto', t: 'Presupuesto' }]} /></div>}
+    {vistaO === 'presupuesto' ? <Presupuesto /> : <>    <Estado carga={carga}>{(d) => <Tabla buscar={false} columnas={[{ k: 'centro', t: 'Centro de trabajo', render: (o) => <strong>{o.centro}</strong> }, { k: 'personas', t: 'Personas', num: true }, { k: 'dias', t: 'Días-persona', num: true }, { k: 'horas', t: 'Horas', num: true, render: (o) => horasDec(o.horas) }, { k: 'extras', t: 'Extra', num: true, render: (o) => horasDec(o.extras) }, { k: 'tardanzas', t: 'Tardanzas', num: true }, { k: 'ausencias', t: 'Ausencias', num: true }, { k: 'costo', t: 'Costo devengado', num: true, render: (o) => pesos(o.costo) }]}
       filas={d.obras} clave={(o) => o.centroId} vacio="No hay actividad en ese rango." />}</Estado>
-    <p className="suave chico" style={{ marginTop: 12 }}>Las horas se cuentan en la obra donde se marcó. El costo corresponde al devengado del personal asignado a cada centro (sin prestaciones ni aportes del empleador).</p></>;
+    <p className="suave chico" style={{ marginTop: 12 }}>Las horas se cuentan en la obra donde se marcó. El costo corresponde al devengado del personal asignado a cada centro (sin prestaciones ni aportes del empleador).</p></>}</>;
 }
 
 /* ---------- Alertas ---------- */
 export function Alertas() {
   const carga = useCarga(() => api('adminConfig'), []), bit = useCarga(() => api('adminBitacoras', { cual: 'alertas' }), []), [tab, setTab] = useState('config'), [f, setF] = useState(null), [correr, ocupado] = useAccion();
-  useEffect(() => { if (carga.datos && !f) { const c = carga.datos; setF({ correoAlertas: c.correoAlertas, minutosAusencia: c.minutosAusencia, fatigaHorasMax: c.fatigaHorasMax, fatigaAvisoMin: c.fatigaAvisoMin, recordatorioMin: c.recordatorioMin, recordatorioCorreo: c.recordatorioCorreo, alertas: Object.fromEntries(Object.keys(c.tiposAlerta).map((k) => [k, { activo: c.alertas[k]?.activo !== false, correos: c.alertas[k]?.correos || '' }])) }); } }, [carga.datos]); // eslint-disable-line
+  useEffect(() => { if (carga.datos && !f) { const c = carga.datos; setF({ telegramSinNombres: c.telegramSinNombres !== false, alertasAgrupadas: !!c.alertasAgrupadas, telegramChatId: c.telegramChatId || '', telegramToken: '', correoAlertas: c.correoAlertas, minutosAusencia: c.minutosAusencia, fatigaHorasMax: c.fatigaHorasMax, fatigaAvisoMin: c.fatigaAvisoMin, recordatorioMin: c.recordatorioMin, recordatorioCorreo: c.recordatorioCorreo, alertas: Object.fromEntries(Object.keys(c.tiposAlerta).map((k) => [k, { activo: c.alertas[k]?.activo !== false, correos: c.alertas[k]?.correos || '' }])) }); } }, [carga.datos]); // eslint-disable-line
   const pon = (k, campo, v) => setF((x) => ({ ...x, alertas: { ...x.alertas, [k]: { ...x.alertas[k], [campo]: v } } }));
   return <><Titulo t="Alertas">Qué situaciones avisan por correo y a quién. Cada alerta puede tener sus propios destinatarios.</Titulo>
     <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Vista de alertas" valor={tab} alCambiar={setTab} opciones={[{ v: 'config', t: 'Configurar' }, { v: 'historial', t: 'Historial' }]} /></div>
@@ -239,6 +252,11 @@ export function Alertas() {
           <Campo etiqueta="Recordatorio de marcación (min)" type="number" min="0" ayuda="Antes de entrar y después de la hora de salida; igual en el almuerzo." value={f.recordatorioMin} onChange={(e) => setF({ ...f, recordatorioMin: e.target.value })} /></div>
         <div className="rejilla"><Campo etiqueta="Control de fatiga: máximo de horas continuas" type="number" min="0" step="0.5" ayuda="Jornada abierta, sin contar el almuerzo marcado. 0 = sin control." value={f.fatigaHorasMax} onChange={(e) => setF({ ...f, fatigaHorasMax: e.target.value })} />
           <Campo etiqueta="Avisar antes del máximo (min)" type="number" min="0" ayuda="La alerta sale estos minutos antes de llegar al límite." value={f.fatigaAvisoMin} onChange={(e) => setF({ ...f, fatigaAvisoMin: e.target.value })} /></div>
+        <Casilla checked={f.alertasAgrupadas} onChange={(e) => setF({ ...f, alertasAgrupadas: e.target.checked })}>Agrupar tardanzas, ausencias y marcaciones fuera de zona en un resumen por hora (ahorra correos: Gmail gratuito permite 100 al día)</Casilla>
+        <details><summary className="etiqueta" style={{ cursor: 'pointer', minHeight: 40, display: 'flex', alignItems: 'center' }}>Alertas también por Telegram (opcional)</summary><div className="pila" style={{ marginTop: 8 }}>
+          <p className="suave chico">Crea un bot con @BotFather, agrégalo a un grupo y pega aquí su token y el número del grupo. Los mensajes llevan nombres y novedades del personal: menciónalo en tu política de privacidad.</p>
+          <div className="rejilla"><Campo etiqueta={c.tieneTelegram ? 'Token del bot (guardado; escribe solo para cambiarlo)' : 'Token del bot'} type="password" autoComplete="off" value={f.telegramToken} onChange={(e) => setF({ ...f, telegramToken: e.target.value })} /><Campo etiqueta="Número del grupo (chat id)" value={f.telegramChatId} onChange={(e) => setF({ ...f, telegramChatId: e.target.value })} /></div></div></details>
+        {f.telegramChatId && <Casilla checked={f.telegramSinNombres !== false} onChange={(e) => setF({ ...f, telegramSinNombres: e.target.checked })}>Enviar a Telegram sin nombres de personas (Telegram guarda los mensajes fuera de Colombia)</Casilla>}
         <Casilla checked={f.recordatorioCorreo} onChange={(e) => setF({ ...f, recordatorioCorreo: e.target.checked })}>Enviar además el recordatorio por correo al trabajador que no ha marcado (llega aunque tenga la aplicación cerrada)</Casilla>
       </div></Tarjeta>
       <Tarjeta titulo="Tipos de alerta"><div className="pila junta">{Object.keys(c.tiposAlerta).map((k) => <div key={k} className="fila" style={{ alignItems: 'flex-end', borderTop: '1px solid var(--c-borde)', paddingTop: 12 }}>
@@ -251,8 +269,8 @@ export function Alertas() {
 
 /* ---------- Configuración ---------- */
 const PCT = ['recargoNocturno', 'extraDiurna', 'extraNocturna', 'recargoDominical', 'pctSalud', 'pctPension'];
-export function Config({ centros, recargarYo }) {
-  const carga = useCarga(() => api('adminConfig'), []), [tab, setTab] = useState('empresa'), [f, setF] = useState(null), [L, setL] = useState(null), [jefe, setJefe] = useState(null), [correr, ocupado] = useAccion(), avisos = useAvisos();
+export function Config({ centros, recargarYo, yo, tabInicial, modulos = {} }) {
+  const carga = useCarga(() => api('adminConfig'), []), [tab, setTab] = useState(tabInicial || 'empresa'), [f, setF] = useState(null), [L, setL] = useState(null), [jefe, setJefe] = useState(null), [correr, ocupado] = useAccion(), avisos = useAvisos();
   useEffect(() => { const c = carga.datos; if (!c) return; setF(c); const e = c.legalEfectivo, l = { ...e, festivosExtra: (e.festivosExtra || []).join(', ') }; PCT.forEach((k) => { l[k] = e[k] === null || e[k] === undefined ? '' : Math.round(e[k] * 10000) / 100; }); setL(l); }, [carga.datos]);
   const pon = (k, v) => setF((x) => ({ ...x, [k]: v })), emp = (k, v) => setF((x) => ({ ...x, empresa: { ...x.empresa, [k]: v } }));
   const guardar = async (datos, msg) => { const r = await correr(() => api('adminConfigGuardar', datos), msg || 'Configuración guardada.'); if (r) { carga.recargar(true); recargarYo(); } };
@@ -261,7 +279,7 @@ export function Config({ centros, recargarYo }) {
   const num = (k, t, ayuda, extra) => <Campo etiqueta={t} type="number" min="0" ayuda={ayuda} value={f[k]} onChange={(e) => pon(k, e.target.value)} {...extra} />;
   const leg = (k, t, ayuda, tipo = 'number') => <Campo etiqueta={t} type={tipo} step="any" ayuda={ayuda} value={L[k] ?? ''} onChange={(e) => setL({ ...L, [k]: e.target.value })} />;
   return <><Titulo t="Configuración">Todo lo propio de la empresa se ajusta aquí, sin tocar el código.</Titulo>
-    <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Secciones de configuración" valor={tab} alCambiar={setTab} opciones={[{ v: 'empresa', t: 'Empresa' }, { v: 'reglas', t: 'Reglas de marcación' }, { v: 'jefes', t: 'Jefes que firman' }, { v: 'legal', t: 'Parámetros legales' }, { v: 'datos', t: 'Datos y respaldo' }]} /></div>
+    <div style={{ marginBottom: 16 }}><Pestanas etiqueta="Secciones de configuración" valor={tab} alCambiar={setTab} opciones={[{ v: 'empresa', t: 'Empresa' }, { v: 'reglas', t: 'Reglas de marcación' }, { v: 'jefes', t: 'Jefes que firman' }, { v: 'legal', t: 'Parámetros legales' }, { v: 'datos', t: 'Datos y respaldo' }, { v: 'seguridad', t: 'Seguridad' }, { v: 'licencia', t: 'Licencia' }]} /></div>
     <Estado carga={carga}>{() => f && L && <div className="pila">
       {tab === 'empresa' && <Tarjeta titulo="Datos de la empresa"><div className="pila">
         <div className="rejilla"><Campo etiqueta="Razón social" value={f.empresa.nombre} onChange={(e) => emp('nombre', e.target.value)} /><Campo etiqueta="NIT" value={f.empresa.nit} onChange={(e) => emp('nit', e.target.value)} /></div>
@@ -269,20 +287,24 @@ export function Config({ centros, recargarYo }) {
         <div className="rejilla"><div className="campo"><label htmlFor="logo">Logo</label><div className="fila">{f.empresa.logo && <img src={f.empresa.logo} alt="Logo actual" style={{ height: 44, background: '#fff', borderRadius: 6 }} />}<input id="logo" className="entrada crece" style={{ paddingTop: 10 }} type="file" accept="image/*" onChange={logo} /></div></div>
           <Campo etiqueta="Color principal" type="color" ayuda="Se aplica al encabezado y los botones (modo claro)." value={f.empresa.color || '#0E4A5A'} onChange={(e) => emp('color', e.target.value)} /></div>
         <div className="rejilla"><Campo etiqueta="Correo para derechos de datos personales" type="email" ayuda="Aparece en la política de privacidad." value={f.empresa.correoDatos} onChange={(e) => emp('correoDatos', e.target.value)} /><Campo etiqueta="Área responsable de los datos" value={f.empresa.responsableDatos} onChange={(e) => emp('responsableDatos', e.target.value)} /></div>
+        <fieldset style={{ border: 0, padding: 0, margin: 0 }} className="pila junta"><legend className="etiqueta">Contactos de emergencia que ve el personal</legend><span className="ayuda">Además de la empresa y los jefes. Por ejemplo: brigadista, enfermería, línea de la ARL.</span>
+          {(f.contactosEmergencia || []).map((x, i) => <div className="fila" key={i}><input className="entrada crece" aria-label="Nombre" placeholder="Nombre" value={x.nombre} onChange={(e) => pon('contactosEmergencia', f.contactosEmergencia.map((y, k) => (k === i ? { ...y, nombre: e.target.value } : y)))} /><input className="entrada crece" aria-label="Rol" placeholder="Rol" value={x.rol} onChange={(e) => pon('contactosEmergencia', f.contactosEmergencia.map((y, k) => (k === i ? { ...y, rol: e.target.value } : y)))} /><input className="entrada crece" aria-label="Teléfono" inputMode="tel" placeholder="Teléfono" value={x.telefono} onChange={(e) => pon('contactosEmergencia', f.contactosEmergencia.map((y, k) => (k === i ? { ...y, telefono: e.target.value } : y)))} /><Boton chico variante="texto" aria-label="Quitar contacto" onClick={() => pon('contactosEmergencia', f.contactosEmergencia.filter((_, k) => k !== i))}>Quitar</Boton></div>)}
+          <Boton chico variante="secundario" icono={Plus} onClick={() => pon('contactosEmergencia', [...(f.contactosEmergencia || []), { nombre: '', rol: '', telefono: '' }])}>Agregar contacto</Boton></fieldset>
         <Campo etiqueta="Titular del software" ayuda="Aparece en la página de propiedad intelectual." value={f.empresa.titularSoftware} onChange={(e) => emp('titularSoftware', e.target.value)} />
         <Campo como="select" etiqueta="Periodo de nómina" value={f.periodoNomina} onChange={(e) => pon('periodoNomina', e.target.value)} opciones={[{ v: 'quincenal', t: 'Quincenal' }, { v: 'mensual', t: 'Mensual' }]} />
-        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar({ empresa: f.empresa, periodoNomina: f.periodoNomina })}>Guardar</Boton></div></div></Tarjeta>}
+        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar({ empresa: f.empresa, periodoNomina: f.periodoNomina, contactosEmergencia: f.contactosEmergencia || [] })}>Guardar</Boton></div></div></Tarjeta>}
 
       {tab === 'reglas' && <Tarjeta titulo="Reglas de marcación y permisos"><div className="pila">
         <div className="rejilla">{num('fotoProbabilidad', 'Foto al azar (% de marcaciones)', '0 = nunca, 100 = siempre.', { max: 100 })}{num('radioDefecto', 'Radio por defecto de un centro (m)')}</div>
         <Casilla checked={f.geocercaEstricta} onChange={(e) => pon('geocercaEstricta', e.target.checked)}>Impedir la marcación fuera del radio del centro de trabajo. Si está apagado, se deja marcar pero se genera una alerta.</Casilla>
         <div className="rejilla">{num('toleranciaMin', 'Tolerancia de llegada por defecto (min)')}{num('diasAtrasManual', 'Días hacia atrás para “Se me olvidó marcar”')}</div>
+        <Casilla checked={!!f.compensarExtras} onChange={(e) => pon('compensarExtras', e.target.checked)}>Permitir abonar horas extra al banco de compensatorios en vez de pagarlas. Atención: el Ministerio del Trabajo (concepto 36107) considera que las horas extra se pagan con su recargo y no se compensan con tiempo. Actívalo solo con asesoría legal.</Casilla>
         <div className="rejilla">{num('factorPrestacional', 'Factor prestacional (%)', 'Se suma al costo en Informes: prestaciones, aportes y parafiscales del empleador. Suele estar entre 50 y 55 %.')}</div>
         <div className="rejilla">{num('horasLimitePermiso', 'Límite para responder un permiso (horas)', 'Pasado este tiempo sin todas las firmas, vence y te llega una alerta.')}{num('sesionDias', 'Duración de la sesión (días)', 'El usuario permanece ingresado en su celular este tiempo.')}</div>
         <Casilla checked={f.aprobacionFinalAdmin} onChange={(e) => pon('aprobacionFinalAdmin', e.target.checked)}>Después de las firmas de los jefes, exigir la aprobación final del administrador (recomendado)</Casilla>
         <Casilla checked={f.autoRegistro} onChange={(e) => pon('autoRegistro', e.target.checked)}>Permitir que personas no cargadas se registren con el código de la empresa (quedan pendientes de tu aprobación)</Casilla>
         {f.autoRegistro && <Campo etiqueta="Código de la empresa" ayuda="Compártelo solo con tu personal. Cámbialo si se filtra." value={f.codigoEmpresa} onChange={(e) => pon('codigoEmpresa', e.target.value)} />}
-        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar(Object.fromEntries(['factorPrestacional', 'fotoProbabilidad', 'radioDefecto', 'geocercaEstricta', 'toleranciaMin', 'diasAtrasManual', 'horasLimitePermiso', 'sesionDias', 'aprobacionFinalAdmin', 'autoRegistro', 'codigoEmpresa'].map((k) => [k, f[k]])))}>Guardar</Boton></div></div></Tarjeta>}
+        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar(Object.fromEntries(['compensarExtras', 'factorPrestacional', 'fotoProbabilidad', 'radioDefecto', 'geocercaEstricta', 'toleranciaMin', 'diasAtrasManual', 'horasLimitePermiso', 'sesionDias', 'aprobacionFinalAdmin', 'autoRegistro', 'codigoEmpresa'].map((k) => [k, f[k]])))}>Guardar</Boton></div></div></Tarjeta>}
 
       {tab === 'jefes' && <Tarjeta titulo="Jefes que firman los permisos" accion={<Boton chico icono={Plus} onClick={() => setJefe({ nombre: '', cargo: '', email: '', whatsapp: '', centros: [], activo: true, pin: '' })}>Agregar jefe</Boton>}>
         <p className="suave chico" style={{ marginBottom: 12 }}>Cada permiso debe ser firmado por todos los jefes activos del centro de trabajo del solicitante. Firman desde un enlace que reciben por WhatsApp o correo, con su clave personal.</p>
@@ -303,16 +325,30 @@ export function Config({ centros, recargarYo }) {
         {leg('festivosExtra', 'Días de descanso adicionales de la empresa', 'Fechas AAAA-MM-DD separadas por coma. Los festivos nacionales se calculan solos cada año.', 'text')}
         <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={guardarLegal}>Guardar parámetros</Boton></div></div></Tarjeta>}
 
+      {tab === 'legal' && <Tarjeta titulo="Aportes del empleador (provisiones y presupuesto)"><div className="pila">
+        <div className="rejilla">{num('arlPct', 'Tarifa de ARL (%)', 'Riesgo I 0,522 · II 1,044 · III 2,436 · IV 4,35 · V 6,96. Para obra civil suele ser V.', { step: '0.001', min: '0.348', max: '6.96' })}</div>
+        <Casilla checked={!!f.exoneradoAportes} onChange={(e) => pon('exoneradoAportes', e.target.checked)}>La empresa está exonerada de salud, SENA e ICBF para quienes ganan menos de 10 salarios mínimos (Estatuto Tributario art. 114-1). Aplica a personas jurídicas declarantes de renta y a personas naturales con dos o más trabajadores. Confírmalo con tu contador.</Casilla>
+        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar({ arlPct: +f.arlPct, exoneradoAportes: !!f.exoneradoAportes })}>Guardar</Boton></div></div></Tarjeta>}
       {tab === 'legal' && <Tarjeta titulo="Códigos de concepto para el archivo plano"><div className="pila">
         <p className="suave chico">Escribe el código que usa tu software contable para cada concepto. El archivo plano (CSV) de cada nómina cerrada sale con estos códigos; si dejas uno vacío, sale la sigla interna.</p>
         <div className="rejilla">{Object.keys(CONCEPTOS).map((k) => <Campo key={k} etiqueta={`${CONCEPTOS[k]} (${k})`} maxLength={20} value={(f.codigosConcepto || {})[k] || ''} onChange={(e) => pon('codigosConcepto', { ...(f.codigosConcepto || {}), [k]: e.target.value })} />)}</div>
         <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar({ codigosConcepto: f.codigosConcepto || {} }, 'Códigos guardados.')}>Guardar códigos</Boton></div></div></Tarjeta>}
 
+      {tab === 'seguridad' && <Tarjeta titulo="Seguridad de la marcación y del acceso"><div className="pila">
+        <Casilla checked={!!f.soloCentroAsignado} onChange={(e) => pon('soloCentroAsignado', e.target.checked)}>Cada persona solo marca en su centro asignado</Casilla>
+        <Casilla checked={!!f.fotoEnAnomalia} onChange={(e) => pon('fotoEnAnomalia', e.target.checked)}>Pedir foto siempre que la marcación sea dudosa (fuera de la obra, GPS impreciso o desplazamiento imposible)</Casilla>
+        <div className="rejilla">{num('maxPrecisionGps', 'Precisión mínima del GPS (m)', 'Rechaza ubicaciones con un margen de error mayor. 0 = no rechazar.')}{num('qrVentanaSeg', 'El QR de portería cambia cada (segundos)')}</div>
+        {modulos.seguridadPro && <><Casilla checked={!!f.vincularDispositivo} onChange={(e) => pon('vincularDispositivo', e.target.checked)}>Vincular cada cuenta de trabajador a un solo celular (para cambiar de equipo: Personal → Editar → Liberar celular)</Casilla>
+          <Casilla checked={!!f.admin2FA} onChange={(e) => pon('admin2FA', e.target.checked)}>Pedir a los administradores un código por correo al ingresar</Casilla></>}
+        <div className="rejilla">{num('sesionAdminHoras', 'La sesión de un administrador dura (horas)')}{num('sesionDias', 'La sesión de un trabajador dura (días)')}</div>
+        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar(Object.fromEntries(['soloCentroAsignado', 'fotoEnAnomalia', 'maxPrecisionGps', 'qrVentanaSeg', 'vincularDispositivo', 'admin2FA', 'sesionAdminHoras', 'sesionDias'].map((k) => [k, f[k]])))}>Guardar</Boton></div></div></Tarjeta>}
+      {tab === 'licencia' && <Licencia yo={yo} recargarYo={recargarYo} />}
       {tab === 'datos' && <Tarjeta titulo="Conservación de datos y copias de seguridad"><div className="pila">
         <div className="rejilla">{num('retencionFotosDias', 'Conservar las fotos (días)', 'Luego se eliminan solas.')}{num('retencionGpsDias', 'Conservar las coordenadas GPS (días)', 'Luego se borran; la marcación se conserva.')}</div>
         <div className="rejilla">{num('respaldoCadaDias', 'Copia de seguridad cada (días)', '0 = desactivada.')}{num('respaldoConservar', 'Copias que se conservan')}</div>
+        <div className="rejilla">{num('retencionSoportesDias', 'Conservar soportes de permisos e incapacidades (días)', 'Después se borra la foto; el registro queda.')}{num('archivarMeses', 'Pasar marcaciones al archivo histórico después de (meses)', 'Solo periodos cerrados. El histórico queda en su propia carpeta y no se borra. 0 = nunca.')}</div>
         <Campo etiqueta="Versión de las políticas" ayuda="Si la cambias, todos deberán autorizar de nuevo el tratamiento de datos al entrar." value={f.versionLegal} onChange={(e) => pon('versionLegal', e.target.value)} />
-        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar(Object.fromEntries(['retencionFotosDias', 'retencionGpsDias', 'respaldoCadaDias', 'respaldoConservar', 'versionLegal'].map((k) => [k, f[k]])))}>Guardar</Boton></div></div></Tarjeta>}
+        <div className="fila fin"><Boton icono={Save} cargando={ocupado} onClick={() => guardar(Object.fromEntries(['retencionFotosDias', 'retencionGpsDias', 'respaldoCadaDias', 'respaldoConservar', 'versionLegal', 'retencionSoportesDias', 'archivarMeses'].map((k) => [k, f[k]])))}>Guardar</Boton></div></div></Tarjeta>}
     </div>}</Estado>
     <Hoja abierta={!!jefe} alCerrar={() => setJefe(null)} titulo={jefe?.id ? 'Editar jefe' : 'Agregar jefe'}>{jefe && <>
       <div className="rejilla"><Campo etiqueta="Nombre" required value={jefe.nombre} onChange={(e) => setJefe({ ...jefe, nombre: e.target.value })} /><Campo etiqueta="Cargo" value={jefe.cargo} onChange={(e) => setJefe({ ...jefe, cargo: e.target.value })} /></div>
@@ -324,7 +360,8 @@ export function Config({ centros, recargarYo }) {
 }
 
 /* ---------- Sistema: monitoreo, errores, pruebas, respaldo, auditoría ---------- */
-export function Sistema() {
+export function Sistema({ modulos = {} }) {
+  const [aud, setAud] = useState(null);
   const salud = useCarga(() => api('adminSalud', {}, { espera: 90000 }), []), [tab, setTab] = useState('salud'), bit = useCarga(() => (tab === 'salud' ? Promise.resolve([]) : api('adminBitacoras', { cual: tab })), [tab]), [correr, ocupado] = useAccion();
   const NOMBRE_TAREA = { tareaCada5: 'Recordatorios y vencimiento de permisos (cada 5 min)', tareaCada15: 'Ausencias y jornadas sin salida (cada 15 min)', tareaDiaria: 'Limpieza de datos y copia de seguridad (diaria)' };
   return <><Titulo t="Sistema y respaldo" accion={<Boton variante="secundario" icono={RefreshCw} cargando={salud.cargando} onClick={() => salud.recargar()}>Revisar de nuevo</Boton>}>Estado del servicio, pruebas de funcionamiento, copias de seguridad, errores y auditoría.</Titulo>
@@ -339,6 +376,9 @@ export function Sistema() {
       </div>
       {s.disparadores.length < 3 && <Aviso tono="peligro">Faltan tareas automáticas: no habrá alertas de ausencia ni copias de seguridad. Abre la hoja de cálculo → menú «Control de jornada» → «Instalar o reparar».</Aviso>}
       <div className="rejilla dos">
+        {modulos.seguridadPro && <Tarjeta titulo="Integridad de la auditoría"><div className="pila"><p className="suave chico">Cada cambio queda encadenado con el anterior. Si alguien edita a mano la hoja de auditoría, aquí se nota.</p>
+          {aud && (aud.integra ? <Aviso tono="ok">Íntegra: {aud.total} registros sin alteraciones.</Aviso> : <Aviso tono="peligro">Se alteraron {aud.alteradas.length} registro(s): {aud.alteradas.slice(0, 5).map((x) => `${fechaHora(x.fecha)} (${x.accion})`).join(', ')}.</Aviso>)}
+          <Boton variante="secundario" onClick={async () => { try { setAud(await api('adminVerificarAuditoria', {}, { espera: 90000 })); } catch (e) { setAud({ integra: false, alteradas: [{ fecha: '', accion: e.message }] }); } }}>Verificar ahora</Boton></div></Tarjeta>}
         <Tarjeta titulo="Pruebas de funcionamiento"><ul className="lista">{s.pruebas.map((p) => <li key={p.nombre}>{p.ok ? <Check size={18} color="var(--c-ok)" aria-hidden="true" /> : <X size={18} color="var(--c-peligro)" aria-hidden="true" />}<span className="crece">{p.nombre}</span><Insignia tono={p.ok ? 'ok' : 'peligro'}>{p.ok ? 'correcta' : 'falló'}</Insignia></li>)}</ul></Tarjeta>
         <Tarjeta titulo="Copia de seguridad"><div className="pila"><p>Última copia: <strong>{s.ultimoRespaldo ? fechaHora(s.ultimoRespaldo) : 'aún no se ha hecho'}</strong></p><p className="suave chico">Se guarda una copia completa de la hoja de cálculo en la carpeta «Copias de seguridad» de tu Drive. Para restaurar: abre la copia y úsala como hoja principal (pasos en LEEME.md).</p>
           <p className="suave chico">Última limpieza de datos: {s.ultimaLimpieza ? s.ultimaLimpieza.replace('T', ' ') : 'pendiente'}</p>

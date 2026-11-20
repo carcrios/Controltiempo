@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlarmClock, BellRing, Building2, CalendarCheck, ClipboardList, Download, FileSpreadsheet, HeartPulse, Image, LayoutDashboard, LogOut, MapPin, Pencil, Plus, RefreshCw, Settings, Stethoscope, Timer, Upload, Users, Wallet, KeyRound, LocateFixed, CalendarClock, BarChart3, Copy, MessageCircle } from 'lucide-react';
+import { AlarmClock, BellRing, Building2, CalendarCheck, ClipboardList, Download, FileSpreadsheet, HeartPulse, Image, LayoutDashboard, LogOut, MapPin, Pencil, Plus, RefreshCw, Settings, Stethoscope, Timer, Upload, Users, Wallet, KeyRound, LocateFixed, CalendarClock, BarChart3, Copy, MessageCircle, Search, ChevronDown } from 'lucide-react';
 import { api, conexion } from './api.js';
 import { Aviso, Boton, Campo, Casilla, Confirmar, Estado, Hoja, Insignia, Tabla, Tarjeta, Vacio, useAvisos, useCarga, useForm } from './ui.jsx';
-import { NOMBRE_TIPO, TIPOS, fechaCorta, fechaHora, horas, hoyISO, pesos, sumarDias, ubicar } from './util.js';
+import { NOMBRE_TIPO, TIPOS, fechaCorta, fechaHora, horas, hoyISO, pesos, sumarDias, ubicar, saludo } from './util.js';
 import Informes from './Informes.jsx';
 import { Permisos, Extras, Incapacidades, Nomina, Obras, Alertas, Config, Sistema, Turnos } from './Admin2.jsx';
+import { ActivarKiosco, BandaLicencia, Comunicados, EnVivo, Expediente, Prestamos, QrObra, moduloActivo } from './Modulos.jsx';
+import { Activity, ArrowRightLeft, Landmark as Banco, Megaphone, QrCode, Smartphone, Tablet, UserX, FolderOpen } from 'lucide-react';
 
 export const periodoActual = (tipo) => { const h = hoyISO(), ym = h.slice(0, 8), d = +h.slice(8), fin = new Date(+h.slice(0, 4), +h.slice(5, 7), 0).getDate();
   return tipo === 'mensual' ? { desde: ym + '01', hasta: ym + fin } : d <= 15 ? { desde: ym + '01', hasta: ym + '15' } : { desde: ym + '16', hasta: ym + fin }; };
@@ -26,13 +28,33 @@ export const Titulo = ({ t, children, accion }) => <div className="titulo-pagina
 
 /* ---------- Tablero ---------- */
 const EST = { presente: ['Trabajando', 'ok'], almuerzo: ['En almuerzo', 'info'], salio: ['Ya salió', ''], ausente: ['No se presentó', 'peligro'], por_llegar: ['Por llegar', ''], permiso: ['En permiso', 'info'], incapacidad: ['Incapacidad', 'info'], descanso: ['Descanso', ''] };
-function Tablero({ ir }) {
+function RelojPanel() {
+  const [t, setT] = useState(new Date());
+  useEffect(() => { const i = setInterval(() => setT(new Date()), 15000); return () => clearInterval(i); }, []);
+  return <span className="reloj-panel" role="timer" aria-label="Hora actual">{t.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', hour12: true })}</span>;
+}
+function GraficaObras({ personas }) {
+  const SERIES = [['trabajando', 'Trabajando', 'var(--c-ok)', 'var(--c-superficie)'], ['tarde', 'Llegaron tarde (ya están)', 'var(--c-acento)', 'var(--c-sobre-acento)'], ['ausente', 'No se presentaron', 'var(--c-peligro)', 'var(--c-superficie)'], ['otro', 'Por llegar, salieron o con novedad', 'var(--c-borde-fuerte)', 'var(--c-texto)']];
+  const g = {}; personas.forEach((p) => { const o = p.centro || 'Sin obra', x = g[o] || (g[o] = { trabajando: 0, tarde: 0, ausente: 0, otro: 0, total: 0 });
+    const k = p.tarde > 0 && ['presente', 'almuerzo', 'salio'].includes(p.estado) ? 'tarde' : ['presente', 'almuerzo'].includes(p.estado) ? 'trabajando' : p.estado === 'ausente' ? 'ausente' : 'otro'; x[k]++; x.total++; });
+  const filas = Object.entries(g).sort((a, b) => b[1].total - a[1].total).slice(0, 8);
+  if (filas.length < 1) return null;
+  return <Tarjeta titulo="Cómo va cada obra hoy">
+    <div className="leyenda">{SERIES.map(([k, t, c]) => <span key={k}><i style={{ background: c }} aria-hidden="true" />{t}</span>)}</div>
+    <div className="obras-barras">{filas.map(([o, x]) => <div key={o} className="obra-fila">
+      <span className="obra-nombre">{o}</span>
+      <div className="obra-barra" role="img" aria-label={`${o}: ${x.trabajando} trabajando, ${x.tarde} tarde, ${x.ausente} ausentes, ${x.otro} otros, de ${x.total}`}>
+        {SERIES.map(([k, t, c, tc]) => x[k] > 0 && <span key={k} title={`${t}: ${x[k]}`} style={{ flexGrow: x[k], background: c, color: tc }}>{x[k]}</span>)}</div>
+      <span className="obra-total">{x.total}</span></div>)}</div>
+  </Tarjeta>;
+}
+function Tablero({ ir, yo }) {
   const carga = useCarga(() => api('adminTablero'), []), [filtro, setFiltro] = useState('');
   useEffect(() => { const i = setInterval(() => { if (document.visibilityState === 'visible') carga.recargar(true); }, 120000); return () => clearInterval(i); }, []); // eslint-disable-line
-  return <><Titulo t="Hoy en la empresa" accion={<Boton variante="secundario" icono={RefreshCw} cargando={carga.cargando} onClick={() => carga.recargar()}>Actualizar</Boton>}>Quién está, quién falta y qué espera tu decisión.</Titulo>
+  return <><Titulo t={`${saludo()}, ${(yo?.usuario?.nombre || '').split(' ')[0]}`} accion={<span className="fila" style={{ gap: 12 }}><RelojPanel /><Boton variante="secundario" icono={RefreshCw} cargando={carga.cargando} onClick={() => carga.recargar()}>Actualizar</Boton></span>}>Así va la empresa hoy: quién está, quién falta y qué espera tu decisión.</Titulo>
     <Estado carga={carga} lineas={8}>{(d) => { const c = d.cuenta, p = d.pendientes, pend = [['permisos', p.permisos, 'permiso(s) por aprobar', 'permisos'], ['extras', p.extras, 'registro(s) de horas extra por aprobar', 'extras'], ['revisar', p.revisar, 'marcación(es) digitadas o tardías por revisar', 'marcaciones'], ['usuarios', p.usuarios, 'usuario(s) nuevos por aprobar', 'personal'], ['salarios', p.salarios, 'salario(s) sin validar', 'personal']].filter((x) => x[1] > 0);
       return <div className="pila amplia">
-        <p className="suave">{new Date(d.fecha + 'T12:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })} · {d.hora}{d.festivo ? ' · festivo' : ''}</p>
+        <p className="suave">{new Date(d.fecha + 'T12:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}{d.festivo ? ' · festivo' : ''}</p>
         {d.pasos && !Object.values(d.pasos).every(Boolean) && <Tarjeta titulo="Primeros pasos" accion={<span className="suave chico">{Object.values(d.pasos).filter(Boolean).length} de 6</span>}>
           <p className="suave chico" style={{ marginBottom: 8 }}>Completa esto una vez y la aplicación queda lista para tu personal.</p>
           <ol className="lista tocable" style={{ paddingLeft: 0 }}>{[['empresa', 'Pon el nombre, NIT y logo de la empresa', 'config'], ['centros', 'Crea las obras o sedes con su horario y ubicación', 'centros'], ['alertas', 'Escribe el correo que recibe las alertas', 'alertas'],
@@ -41,9 +63,10 @@ function Tablero({ ir }) {
         </Tarjeta>}
         <div className="indicadores" role="group" aria-label="Filtrar personal por estado">
           {[['presente', c.presente + c.almuerzo, 'Trabajando', 'ok'], ['ausente', c.ausente, 'No se presentaron', 'peligro'], ['tarde', c.tarde, 'Llegaron tarde', 'aviso'], ['por_llegar', c.por_llegar, 'Por llegar', ''], ['salio', c.salio, 'Ya salieron', ''], ['novedad', c.permiso + c.incapacidad, 'Permiso o incapacidad', 'info']].map(([k, v, t, tono]) =>
-            <button key={k} className={`indicador n-${tono}`} aria-pressed={filtro === k} onClick={() => setFiltro(filtro === k ? '' : k)} style={filtro === k ? { background: 'var(--c-primario-suave)' } : undefined}><span className="valor">{v}</span><span className="rotulo">{t}</span></button>)}
+            <button key={k} className={`indicador n-${tono} ${v === 0 ? 'cero' : ['peligro', 'aviso'].includes(tono) ? 'atencion' : ''}`} aria-pressed={filtro === k} onClick={() => setFiltro(filtro === k ? '' : k)} title={filtro === k ? 'Quitar el filtro' : 'Ver solo estas personas'}><span className="valor">{v}</span><span className="rotulo">{t}</span>{filtro === k && <span className="chico">Filtrando ✕</span>}</button>)}
         </div>
         {pend.length > 0 && <Tarjeta titulo="Esperan tu decisión"><ul className="lista tocable">{pend.map(([k, n, t, destino]) => <li key={k}><button onClick={() => ir(destino)}><Insignia tono="peligro">{n}</Insignia><span className="crece">{t}</span><span className="suave chico">Revisar</span></button></li>)}</ul></Tarjeta>}
+        <GraficaObras personas={d.personas} />
         {p.enFirmas > 0 && <p className="suave chico">{p.enFirmas} permiso(s) están en manos de los jefes para firma.</p>}
         <Tabla columnas={[{ k: 'nombre', t: 'Persona', render: (f) => <><strong>{f.nombre}</strong><div className="suave chico">{f.cargo}</div></> }, { k: 'centro', t: 'Centro de trabajo' },
           { k: 'estado', t: 'Estado', render: (f) => <span className="fila" style={{ gap: 4 }}><Insignia tono={EST[f.estado][1]}>{EST[f.estado][0]}</Insignia>{f.tarde > 0 && <Insignia tono="aviso">tarde {f.tarde} min</Insignia>}{f.fueraZona && <Insignia tono="peligro">fuera de zona</Insignia>}</span>, texto: (f) => EST[f.estado][0] },
@@ -55,8 +78,8 @@ function Tablero({ ir }) {
 
 /* ---------- Personal ---------- */
 const ESTADO_U = { activo: ['Activo', 'ok'], pendiente: ['Por aprobar', 'aviso'], preregistrado: ['Sin activar', 'info'], inactivo: ['Inactivo', ''] };
-function Personal({ centros }) {
-  const carga = useCarga(() => api('adminPersonal'), []), [edit, setEdit] = useState(null), [codigo, setCodigo] = useState(null), [imp, setImp] = useState(null), [correr, ocupado] = useAccion();
+function Personal({ centros, yo }) {
+  const [exp, setExp] = useState(null), [tras, setTras] = useState(null), carga = useCarga(() => api('adminPersonal'), []), [edit, setEdit] = useState(null), [codigo, setCodigo] = useState(null), [imp, setImp] = useState(null), [correr, ocupado] = useAccion();
   const nombreCentro = (id) => centros.find((c) => c.id === id)?.nombre || '—';
   const importar = async (e) => {
     const a = e.target.files[0]; e.target.value = ''; if (!a) return;
@@ -67,7 +90,7 @@ function Personal({ centros }) {
     if (!l.length) return setImp({ error: 'El archivo no tiene filas con las columnas «Cédula» y «Nombre».' });
     const r = await correr(() => api('adminPersonaImportar', { filas: l }, { espera: 120000 })); if (r) { setImp({ res: r }); carga.recargar(true); }
   };
-  return <><Titulo t="Personal" accion={<><label className="btn secundario"><Upload size={20} aria-hidden="true" />Importar Excel<input type="file" accept=".xlsx,.xls,.csv" className="oculto-visual" onChange={importar} /></label><Boton icono={Plus} onClick={() => setEdit({})}>Agregar persona</Boton></>}>Cada persona activa su cuenta con su cédula y un código de un solo uso que entregas tú.</Titulo>
+  return <><Titulo t="Personal" accion={<><label className="btn secundario"><Upload size={20} aria-hidden="true" />Importar Excel<input type="file" accept=".xlsx,.xls,.csv" className="oculto-visual" onChange={importar} /></label><Boton variante="secundario" icono={ArrowRightLeft} onClick={() => setTras({ centroId: centros[0]?.id || '', sel: [] })}>Trasladar</Boton><Boton icono={Plus} onClick={() => setEdit({})}>Agregar persona</Boton></>}>Cada persona activa su cuenta con su cédula y un código de un solo uso que entregas tú.</Titulo>
     <Tarjeta className="hundida" style={{ marginBottom: 16 }}><div className="fila entre"><div className="crece" style={{ minWidth: 220 }}><strong>Enlace para tu personal</strong><div className="suave chico" style={{ wordBreak: 'break-all' }}>{conexion.enlace()}</div><div className="suave chico">Cada persona lo abre en su celular, entra con su cédula y su código de activación, y luego instala la aplicación.</div></div>
       <div className="fila"><Boton chico variante="secundario" icono={Copy} onClick={() => navigator.clipboard?.writeText(conexion.enlace())}>Copiar</Boton><a className="btn secundario chico" href={`https://wa.me/?text=${encodeURIComponent('Control de jornada. Abre este enlace en tu celular para registrar tu entrada y salida: ' + conexion.enlace())}`} target="_blank" rel="noreferrer"><MessageCircle size={16} aria-hidden="true" />WhatsApp</a></div></div></Tarjeta>
     <Estado carga={carga} lineas={8}>{(l) => <Tabla columnas={[
@@ -75,9 +98,16 @@ function Personal({ centros }) {
       { k: 'cargo', t: 'Cargo' }, { k: 'centroId', t: 'Centro', render: (u) => nombreCentro(u.centroId), texto: (u) => nombreCentro(u.centroId) },
       { k: 'salario', t: 'Salario', num: true, render: (u) => <>{pesos(u.salario)}{!u.salarioOk && u.salario > 0 && <div><Insignia tono="aviso">sin validar</Insignia></div>}</> },
       { k: 'estado', t: 'Estado', render: (u) => <Insignia tono={ESTADO_U[u.estado]?.[1]}>{ESTADO_U[u.estado]?.[0] || u.estado}</Insignia>, texto: (u) => ESTADO_U[u.estado]?.[0] },
-      { k: 'a', t: '', acciones: true, orden: false, render: (u) => <Boton chico variante="secundario" icono={Pencil} onClick={() => setEdit(u)}>Editar</Boton> }]}
+      { k: 'a', t: '', acciones: true, orden: false, render: (u) => <span className="fila fin" style={{ gap: 4 }}>{moduloActivo(yo, 'tablero360') && u.estado === 'activo' && <Boton chico variante="texto" icono={FolderOpen} onClick={() => setExp(u.cedula)}>Expediente</Boton>}<Boton chico variante="secundario" icono={Pencil} onClick={() => setEdit(u)}>Editar</Boton></span> }]}
       filas={l} clave={(u) => u.cedula} vacio="Agrega la primera persona o importa la lista desde Excel." />}</Estado>
-    <FormPersona persona={edit} centros={centros} alCerrar={() => setEdit(null)} alGuardar={(r) => { setEdit(null); carga.recargar(true); if (r.codigo) setCodigo(r); }} />
+    <Expediente cedula={exp} alCerrar={() => setExp(null)} esAdmin={yo?.usuario?.rol === 'admin'} />
+    <Hoja abierta={!!tras} alCerrar={() => setTras(null)} titulo="Trasladar personas de obra" alto={0.9}>{tras && <>
+      <Campo como="select" etiqueta="Nuevo centro de trabajo" value={tras.centroId} onChange={(e) => setTras({ ...tras, centroId: e.target.value })} opciones={centros.map((c) => ({ v: c.id, t: c.nombre }))} />
+      <fieldset style={{ border: 0, padding: 0, margin: 0 }} className="pila junta"><legend className="etiqueta">Personas ({tras.sel.length})</legend>
+        <div style={{ maxHeight: 320, overflowY: 'auto' }} className="pila junta">{(carga.datos || []).filter((u) => u.estado === 'activo' && u.centroId !== tras.centroId).map((u) => <Casilla key={u.cedula} checked={tras.sel.includes(u.cedula)} onChange={(e) => setTras({ ...tras, sel: e.target.checked ? [...tras.sel, u.cedula] : tras.sel.filter((x) => x !== u.cedula) })}>{u.nombre} <span className="suave chico">· {nombreCentro(u.centroId)}</span></Casilla>)}</div></fieldset>
+      <p className="suave chico">El cambio aplica desde hoy: los días ya trabajados conservan la obra donde se marcaron.</p>
+      <div className="acciones-hoja"><Boton variante="secundario" onClick={() => setTras(null)}>Cancelar</Boton><Boton cargando={ocupado} disabled={!tras.sel.length} onClick={async () => { const r = await correr(() => api('adminTrasladoMasivo', { centroId: tras.centroId, cedulas: tras.sel })); if (r) { setTras(null); carga.recargar(true); } }}>Trasladar {tras.sel.length} persona(s)</Boton></div></>}</Hoja>
+    <FormPersona yo={yo} persona={edit} centros={centros} alCerrar={() => setEdit(null)} alGuardar={(r) => { setEdit(null); carga.recargar(true); if (r.codigo) setCodigo(r); }} />
     <Hoja abierta={!!codigo} alCerrar={() => setCodigo(null)} titulo="Código de activación" alto={0.55}>{codigo && <>
       <p>Entrega este código a <strong>{codigo.usuario?.nombre || 'la persona'}</strong>. Lo usa una sola vez, junto con su cédula, para crear su contraseña.</p>
       <div className="reloj" style={{ justifyContent: 'center', letterSpacing: '.12em', fontSize: '3.5rem' }} aria-label={`Código ${codigo.codigo.split('').join(' ')}`}>{codigo.codigo}</div>
@@ -90,9 +120,9 @@ function Personal({ centros }) {
     {ocupado && <div className="avisos-flotantes"><div className="flotante" role="status"><span className="giro" />Importando…</div></div>}
   </>;
 }
-function FormPersona({ persona, centros, alCerrar, alGuardar }) {
+function FormPersona({ persona, centros, alCerrar, alGuardar, yo }) {
   const nueva = persona && !persona.cedula, [f, campo, setF] = useForm({}), [correr, ocupado] = useAccion();
-  useEffect(() => { if (persona) setF({ cedula: '', nombre: '', cargo: '', rol: 'trabajador', centroId: centros[0]?.id || '', salario: '', tipoPago: 'mensual', email: '', telefono: '', ingreso: '', eps: '', arl: '', supCentros: [], banco: '', tipoCuenta: '', cuenta: '', retiro: '', ...persona }); }, [persona]); // eslint-disable-line
+  useEffect(() => { if (persona) setF({ cedula: '', nombre: '', cargo: '', rol: 'trabajador', centroId: centros[0]?.id || '', salario: '', tipoPago: 'mensual', email: '', telefono: '', ingreso: '', eps: '', arl: '', supCentros: [], banco: '', tipoCuenta: '', cuenta: '', retiro: '', tipoContrato: '', finContrato: '', ...persona }); }, [persona]); // eslint-disable-line
   const guardar = async (extra) => { const r = await correr(() => api('adminPersonaGuardar', { ...f, salario: +String(f.salario).replace(/\D/g, ''), ...extra }), 'Persona guardada.'); if (r) alGuardar(r); };
   const nuevoCodigo = async () => { const r = await correr(() => api('adminPersonaCodigo', { cedula: f.cedula })); if (r) alGuardar({ codigo: r.codigo, usuario: f }); };
   return <Hoja abierta={!!persona} alCerrar={alCerrar} titulo={nueva ? 'Agregar persona' : 'Editar persona'}>
@@ -101,12 +131,16 @@ function FormPersona({ persona, centros, alCerrar, alGuardar }) {
     <div className="rejilla"><Campo etiqueta="Cargo" {...campo('cargo')} /><Campo como="select" etiqueta="Centro de trabajo" {...campo('centroId')}><option value="">Sin asignar</option>{centros.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</Campo></div>
     <div className="rejilla"><Campo etiqueta="Salario" inputMode="numeric" ayuda="Al guardar queda validado." {...campo('salario')} /><Campo como="select" etiqueta="Forma de pago" opciones={[{ v: 'mensual', t: 'Salario mensual' }, { v: 'dia', t: 'Valor por día trabajado' }]} {...campo('tipoPago')} /></div>
     <div className="rejilla"><Campo etiqueta="Fecha de ingreso" type="date" ayuda="Para calcular vacaciones." {...campo('ingreso')} /><Campo como="select" etiqueta="Rol" opciones={[{ v: 'trabajador', t: 'Trabajador' }, { v: 'supervisor', t: 'Supervisor de obra' }, { v: 'admin', t: 'Administrador' }]} {...campo('rol')} /></div>
+    <div className="rejilla"><Campo como="select" etiqueta="Tipo de contrato" opciones={[{ v: '', t: '—' }, { v: 'indefinido', t: 'Término indefinido' }, { v: 'fijo', t: 'Término fijo' }, { v: 'obra', t: 'Obra o labor' }, { v: 'aprendizaje', t: 'Aprendizaje' }]} {...campo('tipoContrato')} />
+      {(f.tipoContrato === 'fijo' || f.tipoContrato === 'obra' || f.tipoContrato === 'aprendizaje') && <Campo etiqueta="Fin del contrato" type="date" ayuda="Te avisa 35 días antes, para el preaviso de 30." {...campo('finContrato')} />}</div>
     {f.rol === 'supervisor' && <fieldset style={{ border: 0, padding: 0, margin: 0 }} className="pila junta"><legend className="etiqueta">Centros que supervisa</legend><span className="ayuda">Ve el tablero, las marcaciones y los permisos de esa gente, y aprueba sus horas extra. No ve salarios ni nómina. Sin marcar ninguno, supervisa su propio centro.</span>{centros.map((c) => <Casilla key={c.id} checked={(f.supCentros || []).includes(c.id)} onChange={(e) => setF((x) => ({ ...x, supCentros: e.target.checked ? [...(x.supCentros || []), c.id] : (x.supCentros || []).filter((y) => y !== c.id) }))}>{c.nombre}</Casilla>)}</fieldset>}
     <div className="rejilla"><Campo etiqueta="Correo" type="email" {...campo('email')} /><Campo etiqueta="Celular" inputMode="numeric" {...campo('telefono')} /></div>
     <div className="rejilla"><Campo etiqueta="EPS" {...campo('eps')} /><Campo etiqueta="ARL" {...campo('arl')} /></div>
     <div className="rejilla"><Campo etiqueta="Banco" ayuda="Para el archivo plano de pagos." {...campo('banco')} /><Campo como="select" etiqueta="Tipo de cuenta" opciones={[{ v: '', t: '—' }, { v: 'ahorros', t: 'Ahorros' }, { v: 'corriente', t: 'Corriente' }]} {...campo('tipoCuenta')} /><Campo etiqueta="Número de cuenta" inputMode="numeric" {...campo('cuenta')} /></div>
     {!nueva && persona?.estado !== 'pendiente' && <Campo etiqueta="Fecha de retiro" type="date" ayuda="Solo al dar de baja: desde el día siguiente deja de liquidarse. Vacía = hoy." {...campo('retiro')} />}
     {!nueva && <div className="fila"><Boton chico variante="secundario" icono={KeyRound} onClick={nuevoCodigo}>Nuevo código (restablece la contraseña)</Boton>
+      {moduloActivo(yo, 'seguridadPro') && persona?.estado === 'activo' && <Boton chico variante="texto" icono={Smartphone} onClick={async () => { if (await correr(() => api('adminLiberarDispositivo', { cedula: f.cedula }), 'Celular liberado: podrá ingresar desde un equipo nuevo.')) alCerrar(); }}>Liberar celular</Boton>}
+      {persona?.estado === 'inactivo' && <Boton chico variante="texto" icono={UserX} onClick={async () => { if (await correr(() => api('adminAnonimizarUsuario', { cedula: f.cedula }), 'Datos personales suprimidos. Se conservan las jornadas y pagos que exige la ley.')) alGuardar({}); }}>Suprimir datos personales</Boton>}
       {persona?.estado === 'activo' && <Boton chico variante="texto" onClick={() => guardar({ estado: 'inactivo' })}>Dar de baja{f.retiro ? ` el ${fechaCorta(f.retiro)}` : ' hoy'}</Boton>}{persona?.estado === 'inactivo' && <Boton chico variante="texto" onClick={() => guardar({ estado: 'activo' })}>Reactivar</Boton>}</div>}
     <div className="acciones-hoja"><Boton variante="secundario" onClick={alCerrar}>Cancelar</Boton><Boton cargando={ocupado} onClick={() => guardar(persona?.estado === 'pendiente' ? { estado: 'activo' } : {})}>{persona?.estado === 'pendiente' ? 'Guardar y aprobar' : 'Guardar'}</Boton></div>
   </Hoja>;
@@ -115,25 +149,27 @@ function FormPersona({ persona, centros, alCerrar, alGuardar }) {
 /* ---------- Centros de trabajo ---------- */
 const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'], ORDEN = [1, 2, 3, 4, 5, 6, 0];
 const minDia = (h) => { if (!h?.e || !h?.s) return 0; const m = (x) => +x.slice(0, 2) * 60 + +x.slice(3); let t = m(h.s) - m(h.e); if (t <= 0) t += 1440; if (h.ai && h.af) t -= Math.max(0, m(h.af) - m(h.ai)); return t; };
-function Centros({ centros, recargar }) {
-  const [edit, setEdit] = useState(null);
+function Centros({ centros, recargar, yo }) {
+  const [edit, setEdit] = useState(null), [qr, setQr] = useState(null);
   return <><Titulo t="Centros de trabajo" accion={<Boton icono={Plus} onClick={() => setEdit({})}>Agregar centro</Boton>}>Cada obra o sede tiene su horario, su ubicación y su radio permitido para marcar.</Titulo>
     {centros.length === 0 ? <Vacio icono={Building2} titulo="Aún no hay centros de trabajo">Crea el primero para asignarle personal y horario.</Vacio> :
       <div className="rejilla dos">{centros.map((c) => { const sem = ORDEN.reduce((s, d) => s + minDia(c.horario[d]), 0); return <Tarjeta key={c.id}>
         <div className="fila entre" style={{ alignItems: 'flex-start' }}><div><h3>{c.nombre}</h3><p className="suave chico">{c.cliente}{c.direccion ? ` · ${c.direccion}` : ''}</p></div>{!c.activo && <Insignia>Inactivo</Insignia>}</div>
         <ul className="lista chico" style={{ margin: '12px 0' }}>{ORDEN.filter((d) => c.horario[d]).map((d) => <li key={d} style={{ padding: '4px 0' }}><span className="crece">{DIAS[d]}</span><span className="num">{c.horario[d].e}–{c.horario[d].s}{c.horario[d].ai ? ` · almuerzo ${c.horario[d].ai}–${c.horario[d].af}` : ''}</span></li>)}</ul>
-        <div className="fila"><Insignia tono={sem > 42 * 60 ? 'peligro' : 'ok'}>{horas(sem)} por semana</Insignia><Insignia tono={c.lat === null ? 'aviso' : ''}><MapPin size={12} aria-hidden="true" />{c.lat === null ? 'sin ubicación' : `radio ${c.radio} m`}</Insignia><span className="crece" /><Boton chico variante="secundario" icono={Pencil} onClick={() => setEdit(c)}>Editar</Boton></div>
+        <div className="fila"><Insignia tono={sem > 42 * 60 ? 'peligro' : 'ok'}>{horas(sem)} por semana</Insignia><Insignia tono={c.lat === null ? 'aviso' : ''}><MapPin size={12} aria-hidden="true" />{c.lat === null ? 'sin ubicación' : `radio ${c.radio} m`}</Insignia>{c.poligono?.length >= 3 && <Insignia>polígono</Insignia>}{c.exigirQr && <Insignia tono="info">exige QR</Insignia>}<span className="crece" />{moduloActivo(yo, 'qr') && <Boton chico variante="secundario" icono={QrCode} onClick={() => setQr(c)}>QR</Boton>}<Boton chico variante="secundario" icono={Pencil} onClick={() => setEdit(c)}>Editar</Boton></div>
       </Tarjeta>; })}</div>}
-    <FormCentro centro={edit} alCerrar={() => setEdit(null)} alGuardar={() => { setEdit(null); recargar(); }} /></>;
+    <QrObra centro={qr} alCerrar={() => setQr(null)} />
+    <FormCentro yo={yo} centro={edit} alCerrar={() => setEdit(null)} alGuardar={() => { setEdit(null); recargar(); }} /></>;
 }
-function FormCentro({ centro, alCerrar, alGuardar }) {
+function FormCentro({ centro, alCerrar, alGuardar, yo }) {
   const [f, campo, setF] = useForm({}), [hor, setHor] = useState({}), [correr, ocupado] = useAccion(), avisos = useAvisos(), [gps, setGps] = useState(false);
-  useEffect(() => { if (!centro) return; setF({ nombre: '', cliente: '', direccion: '', radio: 150, tol: 5, festivos: false, activo: true, ...centro, lat: centro.lat ?? '', lng: centro.lng ?? '' });
+  useEffect(() => { if (!centro) return; setF({ nombre: '', cliente: '', direccion: '', radio: 150, tol: 5, festivos: false, activo: true, exigirQr: false, presupuestoHoras: '', presupuestoCosto: '', arlPct: '', ...centro, lat: centro.lat ?? '', lng: centro.lng ?? '', poligonoTxt: (centro.poligono || []).map((p) => p.join(', ')).join('\n') });
     setHor(centro.id ? centro.horario : Object.fromEntries([1, 2, 3, 4, 5].map((d) => [d, { e: '07:00', s: '16:24', ai: '12:00', af: '13:00' }]))); }, [centro]); // eslint-disable-line
   const pon = (d, k, v) => setHor((h) => ({ ...h, [d]: { ...(h[d] || {}), [k]: v } }));
   const sem = ORDEN.reduce((s, d) => s + minDia(hor[d]), 0);
   const aqui = async () => { setGps(true); try { const p = await ubicar(); setF((x) => ({ ...x, lat: p.lat.toFixed(6), lng: p.lng.toFixed(6) })); avisos.ok(`Ubicación tomada (precisión ${p.prec} m).`); } catch (e) { avisos.error(e); } finally { setGps(false); } };
-  const guardar = async () => { const r = await correr(() => api('adminCentroGuardar', { ...f, horario: hor }), 'Centro guardado.'); if (r) alGuardar(); };
+  const poligono = () => { const pts = String(f.poligonoTxt || '').split(/[\n;]+/).map((l) => l.split(/[,\s]+/).filter(Boolean).map(Number)).filter((p) => p.length === 2 && !p.some(isNaN)); return pts; };
+  const guardar = async () => { const r = await correr(() => api('adminCentroGuardar', { ...f, horario: hor, poligono: poligono() }), 'Centro guardado.'); if (r) alGuardar(); };
   return <Hoja abierta={!!centro} alCerrar={alCerrar} titulo={centro?.id ? 'Editar centro de trabajo' : 'Nuevo centro de trabajo'} alto={0.92}>
     <div className="rejilla"><Campo etiqueta="Nombre de la obra o sede" required {...campo('nombre')} /><Campo etiqueta="Cliente" {...campo('cliente')} /></div>
     <Campo etiqueta="Dirección" {...campo('direccion')} />
@@ -146,6 +182,12 @@ function FormCentro({ centro, alCerrar, alGuardar }) {
     <div className="rejilla"><Campo etiqueta="Tolerancia de llegada (min)" type="number" min="0" {...campo('tol')} /><Campo etiqueta="Radio permitido (m)" type="number" min="20" {...campo('radio')} /></div>
     <div className="rejilla"><Campo etiqueta="Latitud" inputMode="decimal" {...campo('lat')} /><Campo etiqueta="Longitud" inputMode="decimal" {...campo('lng')} /></div>
     <Boton variante="secundario" icono={LocateFixed} cargando={gps} onClick={aqui}>Usar mi ubicación actual (estoy en la obra)</Boton>
+    <details><summary className="etiqueta" style={{ cursor: 'pointer', minHeight: 40, display: 'flex', alignItems: 'center' }}>Forma exacta de la obra (opcional)</summary>
+      <Campo como="textarea" etiqueta="Esquinas del polígono" ayuda="Una esquina por línea: latitud, longitud. Mínimo 3. Cópialas de Google Maps (clic derecho sobre el mapa). Si lo llenas, reemplaza el radio." placeholder={'4.650120, -74.100340\n4.650980, -74.099120\n4.649870, -74.098760'} {...campo('poligonoTxt')} />
+      {f.poligonoTxt && <p className="chico">{poligono().length >= 3 ? `${poligono().length} esquinas válidas.` : 'Faltan esquinas válidas: se usará el radio.'}</p>}</details>
+    {moduloActivo(yo, 'qr') && <Casilla {...campo('exigirQr', 'check')}>Exigir el código QR de portería para marcar en esta obra</Casilla>}
+    <Campo etiqueta="Tarifa de ARL de esta obra (%)" type="number" step="0.001" min="0.348" max="6.96" ayuda="Vacío = la de la empresa. Riesgo V (obra civil, alturas) = 6,96." {...campo('arlPct')} />
+    {moduloActivo(yo, 'presupuesto') && <div className="rejilla"><Campo etiqueta="Presupuesto de horas al mes" type="number" min="0" {...campo('presupuestoHoras')} /><Campo etiqueta="Presupuesto de costo al mes ($)" inputMode="numeric" {...campo('presupuestoCosto')} /></div>}
     <Casilla {...campo('festivos', 'check')}>En este centro se trabaja los festivos según el horario</Casilla>
     <Casilla {...campo('activo', 'check')}>Centro activo</Casilla>
     <div className="acciones-hoja"><Boton variante="secundario" onClick={alCerrar}>Cancelar</Boton><Boton cargando={ocupado} onClick={guardar}>Guardar centro</Boton></div>
@@ -184,21 +226,30 @@ function Marcaciones({ centros, soloVer }) {
 }
 
 /* ---------- Estructura ---------- */
-const MENU = [['Día a día', [['tablero', 'Hoy', LayoutDashboard], ['marcaciones', 'Marcaciones', ClipboardList, 'revisar'], ['permisos', 'Permisos', CalendarCheck, 'permisos'], ['extras', 'Horas extra', Timer, 'extras'], ['incapacidades', 'Incapacidades', Stethoscope]]],
-  ['Pago', [['informes', 'Informes', BarChart3], ['nomina', 'Nómina y desprendibles', Wallet], ['obras', 'Resumen por obra', FileSpreadsheet]]],
-  ['Empresa', [['personal', 'Personal', Users, 'usuarios'], ['centros', 'Centros de trabajo', Building2], ['turnos', 'Turnos', CalendarClock], ['alertas', 'Alertas', BellRing], ['config', 'Configuración', Settings], ['sistema', 'Sistema y respaldo', HeartPulse]]]];
+const MENU = [['Día a día', [['tablero', 'Hoy', LayoutDashboard], ['marcaciones', 'Marcaciones', ClipboardList, 'revisar'], ['permisos', 'Permisos', CalendarCheck, 'permisos'], ['extras', 'Horas extra', Timer, 'extras'], ['incapacidades', 'Incapacidades', Stethoscope], ['envivo', 'En vivo', Activity, null, 'tablero360'], ['kiosco', 'Kiosco', Tablet, null, 'kiosco']]],
+  ['Pago', [['informes', 'Informes', BarChart3], ['nomina', 'Nómina', Wallet], ['prestamos', 'Préstamos', Banco, null, ['prestamos', 'nomina']], ['obras', 'Por obra', FileSpreadsheet]]],
+  ['Empresa', [['personal', 'Personal', Users, 'usuarios'], ['centros', 'Obras y sedes', Building2], ['turnos', 'Turnos', CalendarClock, null, 'turnos'], ['comunicados', 'Comunicados', Megaphone, null, 'autoservicio'], ['alertas', 'Alertas', BellRing], ['config', 'Configuración', Settings], ['sistema', 'Sistema', HeartPulse]]]];
 export default function Admin({ yo, recargarYo, alSalir }) {
   window.__yo = yo;
-  const [vista, setVista] = useState('tablero'), centrosC = useCarga(() => api('adminCentros'), []), pend = useCarga(() => api('adminTablero').then((d) => d.pendientes), [vista === 'tablero']), sup = yo.usuario.rol !== 'admin';
-  const menu = sup ? [['Mi equipo', MENU[0][1].filter((x) => ['tablero', 'marcaciones', 'permisos', 'extras'].includes(x[0])).concat([['informes', 'Informes', BarChart3]])]] : MENU;
-  const centros = centrosC.datos || [], ir = (v) => { setVista(v); window.scrollTo(0, 0); }, n = (k) => (k && pend.datos ? pend.datos[k] : 0);
-  const comun = { centros, cfg: yo.cfg, ir, soloVer: sup };
-  return <div className="admin">
-    <nav className="admin-nav no-imprimir" aria-label="Administración">{menu.map(([g, items]) => <div key={g}><h2>{g}</h2>{items.map(([k, t, I, c]) => <button key={k} aria-current={vista === k ? 'page' : undefined} onClick={() => ir(k)}><I size={18} aria-hidden="true" />{t}{n(c) > 0 && <span className="cuenta" aria-label={`${n(c)} pendientes`}>{n(c)}</span>}</button>)}</div>)}
+  const [sub, setSub] = useState(''), [vista, setVista] = useState('tablero'), centrosC = useCarga(() => api('adminCentros'), []), pend = useCarga(() => api('adminTablero').then((d) => d.pendientes), [vista === 'tablero']), sup = yo.usuario.rol !== 'admin';
+  const [qMenu, setQMenu] = useState(''), [plegados, setPlegados] = useState(() => { try { return JSON.parse(localStorage.getItem('cj.menuPlegado') || '[]'); } catch { return []; } });
+  const plegar = (g) => { const l = plegados.includes(g) ? plegados.filter((x) => x !== g) : [...plegados, g]; setPlegados(l); try { localStorage.setItem('cj.menuPlegado', JSON.stringify(l)); } catch { /* sin almacenamiento */ } };
+  const sinTilde = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const vale = (x) => { const m = x[4]; return !m || (Array.isArray(m) ? m.some((k) => moduloActivo(yo, k)) : moduloActivo(yo, m)); };
+  const menu = (sup ? [['Mi equipo', MENU[0][1].filter((x) => ['tablero', 'marcaciones', 'permisos', 'extras', 'envivo', 'kiosco'].includes(x[0])).concat([['informes', 'Informes', BarChart3]])]] : MENU).map(([g, l]) => [g, l.filter(vale)]);
+  const centros = centrosC.datos || [], ir = (v, s) => { setVista(v); setSub(s || ''); window.scrollTo(0, 0); }, n = (k) => (k && pend.datos ? pend.datos[k] : 0);
+  const comun = { centros, cfg: yo.cfg, ir, soloVer: sup, yo, modulos: Object.fromEntries((yo.licencia?.modulos || ['asistencia', 'nomina', 'permisos', 'turnos', 'prestamos', 'autoservicio', 'kiosco', 'qr', 'presupuesto', 'tablero360', 'seguridadPro']).map((m) => [m, true])) };
+  return <><BandaLicencia yo={yo} ir={ir} /><div className="admin">
+    <nav className="admin-nav no-imprimir" aria-label="Administración">
+      <div className="nav-buscar"><Search size={16} aria-hidden="true" /><input type="search" placeholder="Buscar sección…" aria-label="Buscar sección" value={qMenu} onChange={(e) => setQMenu(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { const x = menu.flatMap((g) => g[1]).find((i) => sinTilde(i[1]).includes(sinTilde(qMenu))); if (x) { ir(x[0]); setQMenu(''); } } }} /></div>
+      {menu.map(([g, items]) => { const vis = items.filter((i) => !qMenu || sinTilde(i[1]).includes(sinTilde(qMenu))); if (!vis.length) return null;
+        const cerrado = !qMenu && plegados.includes(g) && !vis.some((i) => i[0] === vista), pendG = vis.reduce((s, i) => s + n(i[3]), 0);
+        return <div key={g}><h2><button className="grupo" aria-expanded={!cerrado} onClick={() => plegar(g)}><ChevronDown size={14} aria-hidden="true" style={{ transform: cerrado ? 'rotate(-90deg)' : 'none', transition: 'transform .15s' }} />{g}{cerrado && pendG > 0 && <span className="cuenta">{pendG}</span>}</button></h2>
+          {!cerrado && vis.map(([k, t, I, c]) => <button key={k} aria-current={vista === k ? 'page' : undefined} onClick={() => { ir(k); setQMenu(''); }}><I size={18} aria-hidden="true" />{t}{n(c) > 0 && <span className="cuenta" aria-label={`${n(c)} pendientes`}>{n(c)}</span>}</button>)}</div>; })}
       <div style={{ marginTop: 16, borderTop: '1px solid var(--c-borde)', paddingTop: 8 }}><button onClick={alSalir}><LogOut size={18} aria-hidden="true" />Cerrar sesión</button></div></nav>
     <div className="admin-movil no-imprimir"><Campo como="select" etiqueta="Sección de administración" value={vista} onChange={(e) => ir(e.target.value)}>{menu.map(([g, items]) => <optgroup key={g} label={g}>{items.map(([k, t, , c]) => <option key={k} value={k}>{t}{n(c) > 0 ? ` (${n(c)})` : ''}</option>)}</optgroup>)}</Campo></div>
     <main className="admin-cuerpo" id="contenido" tabIndex={-1}>
-      {vista === 'tablero' && <Tablero ir={ir} />}
+      {vista === 'tablero' && <Tablero ir={ir} yo={yo} />}
       {vista === 'personal' && <Personal {...comun} />}
       {vista === 'centros' && <Centros {...comun} recargar={() => { centrosC.recargar(true); recargarYo(); }} />}
       {vista === 'marcaciones' && <Marcaciones {...comun} />}
@@ -208,10 +259,14 @@ export default function Admin({ yo, recargarYo, alSalir }) {
       {vista === 'nomina' && <Nomina {...comun} />}
       {vista === 'obras' && <Obras {...comun} />}
       {vista === 'alertas' && <Alertas {...comun} />}
-      {vista === 'config' && <Config {...comun} recargarYo={recargarYo} />}
+      {vista === 'config' && <Config {...comun} tabInicial={sub} recargarYo={recargarYo} />}
       {vista === 'sistema' && <Sistema {...comun} />}
       {vista === 'turnos' && <Turnos {...comun} />}
       {vista === 'informes' && <Informes {...comun} />}
+      {vista === 'envivo' && <EnVivo {...comun} />}
+      {vista === 'kiosco' && <ActivarKiosco centros={centros.filter((c) => c.activo !== false)} />}
+      {vista === 'prestamos' && <Prestamos {...comun} />}
+      {vista === 'comunicados' && <Comunicados {...comun} />}
     </main>
-  </div>;
+  </div></>;
 }

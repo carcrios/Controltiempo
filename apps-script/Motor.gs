@@ -218,6 +218,8 @@ var Motor = (function () {
       else if (per && !per.horas) { if (!trabajo && !es31) { if (per.remunerado) diasLic++; else diasPermNoRem++; } }
       else if (!trabajo && prog) { faltaSem[lunesDe(f)] = 1; if (!porDia && !es31) { aus++; ausentes.push(f); } }
       else if (!trabajo && esDescanso(f, cfg)) descansos++;
+      // Jornalero que trabaja su domingo o festivo: conserva el descanso remunerado y además cobra el día con recargo (CST arts. 173, 179 y 180)
+      if (porDia && trabajo && !inc && esDescanso(f, cfg)) descansos++;
       f = sumar(f, 1);
     }
     perms.forEach(function (x) { if (x.horas && !x.remunerado && x.desde >= desde && x.desde <= corte) horasPermNoRem += +x.horas; });
@@ -272,7 +274,7 @@ var Motor = (function () {
   }
 
   /* ---------- Vacaciones (CST art. 186: 15 días hábiles por año) ---------- */
-  function vacacionesCausadas(ingreso, hoy) { if (!ingreso) return 0; return Math.max(0, Math.round(diasEntre(ingreso, hoy) * 15 / 365 * 10) / 10); }
+  function vacacionesCausadas(ingreso, hoy) { if (!ingreso || hoy < ingreso) return 0; return Math.max(0, Math.round(diasNomina(ingreso, hoy) * 15 / 360 * 10) / 10); } // 15 días hábiles por cada 360 (CST art. 186)
   function diasHabiles(desde, hasta, cfg, sabadoHabil) {
     var n = 0, f = desde; while (f <= hasta) { var w = dow(f); if (w !== 0 && !esFestivo(f, cfg) && (w !== 6 || sabadoHabil)) n++; f = sumar(f, 1); } return n;
   }

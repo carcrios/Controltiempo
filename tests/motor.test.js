@@ -122,6 +122,14 @@ t('pago por día: gana el descanso dominical y festivo, y cobra incapacidad y va
   const q = quincena({ usuario: { salario: 58364, tipoPago: 'dia' }, incapacidades: [{ desde: '2026-11-03', hasta: '2026-11-06', tipo: 'general' }] }); q.dias = q.dias.filter(d => d.fecha > '2026-11-06');
   assert(M.liquidarPeriodo(q).conceptos.find(x => x.cod === 'ING').valor > 0);
 });
+t('pago por día: trabajar el domingo conserva el descanso y suma el recargo', () => {
+  const base = M.liquidarPeriodo(quincena({ usuario: { salario: 58364, tipoPago: 'dia' } }));
+  const p = quincena({ usuario: { salario: 58364, tipoPago: 'dia' } }); p.dias.push({ fecha: '2026-11-08', entrada: '07:00', salida: '14:00', horario: null });
+  const r = M.liquidarPeriodo(p), dr = (x) => x.conceptos.find((k) => k.cod === 'DR').cantidad;
+  eq(dr(r), dr(base), 'el domingo trabajado no le quita el descanso remunerado');
+  assert(r.devengado - base.devengado >= 58364 + 7 * 58364 / 7 * 0.9 - 2, 'cobra el día y el recargo dominical');
+});
+t('vacaciones: 15 días por cada 360 de servicio (meses de 30 días)', () => { eq(M.vacacionesCausadas('2025-01-01', '2025-12-30'), 15); eq(M.vacacionesCausadas('2026-01-01', '2026-06-30'), 7.5); });
 t('fecha de retiro: no se liquida después de salir', () => {
   const p = quincena({ retiro: '2026-11-05' }); p.dias = p.dias.filter(d => d.fecha <= '2026-11-05'); const r = M.liquidarPeriodo(p); eq(r.diasNomina, 5); eq(r.ausencias, 0);
 });

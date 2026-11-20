@@ -20,9 +20,11 @@ function a_recuperarCambiar(d) {
   if (!h || h !== hmac_('rec|' + ced + '|' + soloDigitos_(d.codigo))) throw E_('CODIGO', 'El código no coincide o ya venció. Pide uno nuevo.');
   if (claveDebil_(d.clave, ced)) throw E_('DATOS', 'Elige una contraseña de al menos 6 caracteres que no sea tu cédula ni una secuencia fácil.');
   var u = buscar('Usuarios', 'cedula', ced); if (!u || u.estado === 'inactivo') throw E_('PERMISO', 'Tu usuario no está activo.');
-  u.salt = azar_().substr(0, 16); u.hash = hashClave_(String(d.clave), u.salt); guardar('Usuarios', u);
+  u.salt = azar_().substr(0, 16); u.hash = hashClaveV2_(String(d.clave), u.salt); guardar('Usuarios', u);
   c.remove('rec:' + ced); cerrarSesiones_(ced); auditar_(ced, 'clave_recuperada', '');
-  return { token: crearSesion_(ced, d.equipo), usuario: usuarioPublico_(u) };
+  if (u.rol !== 'trabajador') alertar_('seguridad', ced, 'Recuperó la contraseña de una cuenta de ' + u.rol + ' por correo. Si no fue esa persona, desactívala de inmediato.');
+  // No entrega sesión: se ingresa con la clave nueva, pasando por celular vinculado y código por correo.
+  return { listo: true };
 }
 
 /* ---------- Turnos y programación por fechas ---------- */

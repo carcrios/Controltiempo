@@ -1,12 +1,15 @@
+import { IconoAccesibilidad, PanelAccesibilidad } from './a11y.jsx';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Clock, LogOut, RefreshCw, ShieldCheck, UserRound, WifiOff } from 'lucide-react';
-import { api, sesion, configurada, alCaducarSesion, conexion, idDeTexto, urlDeId, reloj, VERSION } from './api.js';
-import { Avisos, Boton, Aviso, Campo, Casilla, Esqueleto, useAvisos } from './ui.jsx';
+import { api, sesion, configurada, alCaducarSesion, conexion, idDeTexto, urlDeId, reloj, VERSION, guardado } from './api.js';
+import { Avisos, Boton, Aviso, Campo, Casilla, Esqueleto, Hoja, useAvisos } from './ui.jsx';
 import Acceso from './Acceso.jsx';
 import Legal, { PieLegal } from './Legal.jsx';
 import Firma from './Firma.jsx';
+import { VerificarCertificado } from './Autoservicio.jsx';
 import Trabajador from './Trabajador.jsx';
 import Admin from './Admin.jsx';
+import { Kiosco } from './Modulos.jsx';
 
 const ruta = () => location.hash.replace(/^#\/?/, '').split('/');
 function useRuta() { const [r, setR] = useState(ruta); useEffect(() => { const f = () => { setR(ruta()); window.scrollTo(0, 0); }; window.addEventListener('hashchange', f); return () => window.removeEventListener('hashchange', f); }, []); return r; }
@@ -25,8 +28,13 @@ function aplicarMarca(empresa) {
   raiz.setProperty('--c-sobre-primario', lum > 0.6 ? '#14242A' : '#FFFFFF');
 }
 
+export function BotonAccesibilidad({ claro }) {
+  const [abierta, setAbierta] = useState(false);
+  return <><button type="button" className={`btn-a11y ${claro ? 'claro' : ''}`} onClick={() => setAbierta(true)} aria-label="Opciones de accesibilidad" title="Accesibilidad"><IconoAccesibilidad size={22} aria-hidden="true" /></button>
+    <Hoja abierta={abierta} alCerrar={() => setAbierta(false)} titulo="Accesibilidad"><PanelAccesibilidad /></Hoja></>;
+}
 export function Cabecera({ empresa, children }) {
-  return <header className="cabecera no-imprimir"><div className="marca">{empresa?.logo ? <img src={empresa.logo} alt="" /> : <Clock size={26} aria-hidden="true" />}<strong>{empresa?.nombre || 'Control de jornada'}</strong></div>{children}</header>;
+  return <header className="cabecera no-imprimir"><div className="marca">{empresa?.logo ? <img src={empresa.logo} alt="" /> : <Clock size={26} aria-hidden="true" />}<strong>{empresa?.nombre || 'Control de jornada'}</strong></div><BotonAccesibilidad />{children}</header>;
 }
 
 function SinConfigurar() {
@@ -82,7 +90,9 @@ function Principal({ alSalir }) {
   const actualizar = useCallback((parcial) => setYo((y) => { const n = { ...y, ...parcial }; sesion.yo = n; return n; }), []);
   const salir = async () => { try { await api('salir'); } catch { /* sin señal: se cierra localmente */ } sesion.cerrar(); alSalir(); };
 
-  if (!yo) return <><Cabecera /><main className="contenido" id="contenido">{error ? <div className="pila"><Aviso tono="peligro">{error.message}</Aviso><Boton onClick={cargar}>Reintentar</Boton><Boton variante="texto" onClick={salir}>Cerrar sesión</Boton></div> : <div className="pila" role="status"><span className="oculto-visual">Cargando tu información…</span><div className="esqueleto" style={{ height: 260, borderRadius: 16 }} /><Esqueleto lineas={4} /></div>}</main></>;
+  if (!yo) return <><Cabecera /><main className="contenido" id="contenido">{error ? <div className="pila"><Aviso tono="peligro">{error.message}</Aviso><Boton onClick={cargar}>Reintentar</Boton>{!sesion.yo?.kiosco && !guardado.leer('cj.kiosco') && <Boton variante="texto" onClick={salir}>Cerrar sesión</Boton>}</div> : <div className="pila" role="status"><span className="oculto-visual">Cargando tu información…</span><div className="esqueleto" style={{ height: 260, borderRadius: 16 }} /><Esqueleto lineas={4} /></div>}</main></>;
+  if (!yo.kiosco && guardado.leer('cj.kiosco')) guardado.poner('cj.kiosco', null); // ya no es kiosco: se vuelve a mostrar «Cerrar sesión»
+  if (yo.kiosco) return <main id="contenido"><Kiosco kiosco={yo.kiosco} empresa={yo.cfg?.empresa} alSalir={salir} /></main>;
   const u = yo.usuario, empresa = yo.cfg.empresa;
   const modo = modoSel || (u.rol === 'admin' && window.innerWidth > 900 ? 'admin' : 'yo'), esJefe = u.rol === 'admin' || u.rol === 'supervisor';
   const actualizarApp = () => {
@@ -113,6 +123,7 @@ export default function App() {
   let vista;
   if (r[0] === 'legal') vista = <Legal pagina={r[1]} empresa={publico?.empresa} />;
   else if (r[0] === 'c') vista = <Conectar codigo={r[1]} />;
+  else if (r[0] === 'verificar') vista = configurada() ? <VerificarCertificado /> : <SinConfigurar />;
   else if (!configurada()) vista = <SinConfigurar />;
   else if (r[0] === 'firma') vista = <Firma codigo={r[1]} />;
   else if (!token) vista = <><Acceso publico={publico} alEntrar={(t, usuario) => { sesion.token = t; sesion.yo = null; setToken(t); }} /><PieLegal /></>;

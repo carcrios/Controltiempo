@@ -1,3 +1,4 @@
+import { BotonAccesibilidad } from './App.jsx';
 import React, { useState } from 'react';
 import { ArrowLeft, Clock, Eye, EyeOff } from 'lucide-react';
 import { api, info } from './api.js';
@@ -17,7 +18,10 @@ export default function Acceso({ publico, alEntrar }) {
 
   const consultar = (e) => { e.preventDefault(); if (ced.length < 5) return setErr({ cedula: 'Escribe tu número de cédula completo, sin puntos.' });
     correr(async () => { const r = await api('consultarCedula', { cedula: ced }); if (r.inactivo) throw new Error('Tu usuario está inactivo. Habla con el administrador.'); setPaso(r.existe ? 'clave' : 'nuevo'); }); };
-  const entrar = (e) => { e.preventDefault(); correr(async () => { const r = await api('login', { cedula: ced, clave: f.clave, ...info() }); alEntrar(r.token, r.usuario); }); };
+  const ingresar = async (clave, codigo2fa) => {
+    try { const r = await api('login', { cedula: ced, clave, ...info(), ...(codigo2fa ? { codigo2fa } : {}) }); alEntrar(r.token, r.usuario); }
+    catch (x) { if (x.cod === '2FA_REQUERIDO') { setF((y) => ({ ...y, clave, codigo: '' })); setPaso('dosPasos'); avisos.info(x.message); return; } throw x; } };
+  const entrar = (e) => { e.preventDefault(); correr(() => ingresar(f.clave, paso === 'dosPasos' ? f.codigo.trim() : '')); };
   const validarNuevo = (e) => { e.preventDefault(); const x = {};
     if (!f.codigo.trim()) x.codigo = 'Escribe el código que te dio el administrador.';
     if (f.nombre.trim().length < 5) x.nombre = 'Escribe tu nombre completo.';
@@ -31,9 +35,9 @@ export default function Acceso({ publico, alEntrar }) {
 
   const pedirCodigo = () => correr(async () => { const r = await api('recuperarPedir', { cedula: ced }); setPista(r); if (r.enviado) setPaso('codigo'); });
   const cambiarConCodigo = (e) => { e.preventDefault(); if (f.clave.length < 6) return setErr({ clave: 'Mínimo 6 caracteres.' }); if (f.clave !== f.clave2) return setErr({ clave2: 'Las contraseñas no coinciden.' });
-    correr(async () => { const r = await api('recuperarCambiar', { cedula: ced, codigo: f.codigo.trim(), clave: f.clave, ...info() }); avisos.ok('Contraseña cambiada.'); alEntrar(r.token, r.usuario); }); };
+    correr(async () => { await api('recuperarCambiar', { cedula: ced, codigo: f.codigo.trim(), clave: f.clave, ...info() }); avisos.ok('Contraseña cambiada. Ingresando…'); await ingresar(f.clave, ''); }); };
   const n = { cedula: 1, clave: 2, nuevo: 2, permisos: 3 }[paso];
-  return <main className="acceso" id="contenido"><div className="acceso-caja">
+  return <main className="acceso" id="contenido"><div className="a11y-flotante"><BotonAccesibilidad claro /></div><div className="acceso-caja">
     <div className="logo"><div className="sello">{empresa?.logo ? <img src={empresa.logo} alt="" /> : <Clock size={28} aria-hidden="true" />}</div>
       <div><strong style={{ fontFamily: 'var(--f-titulo)', fontSize: 'var(--t-4)' }}>{empresa?.nombre || 'Control de jornada'}</strong><div className="suave chico">Control de jornada</div></div></div>
     {(paso === 'nuevo' || paso === 'permisos') && <div className="pasos" role="img" aria-label={`Paso ${n} de 3`}>{[1, 2, 3].map((i) => <span key={i} className={i <= n ? 'hecho' : ''} />)}</div>}
@@ -50,6 +54,13 @@ export default function Acceso({ publico, alEntrar }) {
       <Boton type="submit" cargando={carga}>Entrar</Boton>
       <Boton variante="texto" icono={ArrowLeft} onClick={() => { setPaso('cedula'); setErr({}); setF((x) => ({ ...x, clave: '' })); }}>Usar otra cédula</Boton>
       <Boton variante="texto" onClick={() => { setErr({}); setPista(null); setF((x) => ({ ...x, clave: '', clave2: '', codigo: '' })); setPaso('olvido'); }}>Olvidé mi contraseña</Boton></form>}
+
+    {paso === 'dosPasos' && <form className="pila" onSubmit={entrar} noValidate>
+      <h1>Verificación en dos pasos</h1><p className="suave">Enviamos un código de 6 números a tu correo. Vence en 5 minutos. Si pides otro, solo sirve el último que llegue.</p>
+      <Campo etiqueta="Código de verificación" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={6} {...campo('codigo')} />
+      <Boton type="submit" cargando={carga} disabled={f.codigo.trim().length < 6}>Entrar</Boton>
+      <Boton variante="secundario" disabled={carga} onClick={() => correr(() => ingresar(f.clave, ''))}>Enviarme otro código</Boton>
+      <Boton variante="texto" icono={ArrowLeft} onClick={() => { setPaso('clave'); setErr({}); }}>Volver</Boton></form>}
 
     {paso === 'olvido' && <div className="pila">
       <h1>Recuperar contraseña</h1><p className="suave">Cédula {ced}. Te enviamos un código de 6 números al correo que tienes registrado. Vence en 15 minutos.</p>

@@ -3,7 +3,7 @@
  * Base: acceso a datos, seguridad, configuración y enrutador de la API.
  * Una hoja de cálculo = una empresa. Nada de la empresa está escrito en el código: todo vive en la hoja Config.
  */
-var VERSION = '1.6.1';
+var VERSION = '1.7.0';
 // Página publicada (GitHub Pages) que usan tus clientes. Déjala escrita en la plantilla para que el instalador entregue el enlace listo.
 var APP_PREDETERMINADA = '';
 // Clave secreta del proveedor para firmar llaves de licencia por plan/módulos. Si está vacía, todos los módulos quedan activos (modo demostración).
@@ -17,12 +17,12 @@ var _AHORA = null; // solo para pruebas
 
 var HOJAS = {
   Config: ['clave', 'valor'],
-  Usuarios: ['cedula', 'nombre', 'cargo', 'rol', 'centroId', 'salario', 'salarioOk', 'tipoPago', 'email', 'telefono', 'ingreso', 'eps', 'arl', 'estado', 'hash', 'salt', 'codigo', 'consVersion', 'consFecha', 'creado', 'supCentros', 'banco', 'tipoCuenta', 'cuenta', 'retiro', 'dispositivoId', 'fotoRef', 'tipoContrato', 'finContrato'],
+  Usuarios: ['cedula', 'nombre', 'cargo', 'rol', 'centroId', 'salario', 'salarioOk', 'tipoPago', 'email', 'telefono', 'ingreso', 'eps', 'arl', 'estado', 'hash', 'salt', 'codigo', 'consVersion', 'consFecha', 'creado', 'supCentros', 'banco', 'tipoCuenta', 'cuenta', 'retiro', 'dispositivoId', 'fotoRef', 'tipoContrato', 'finContrato', 'liquidado'],
   Sesiones: ['hash', 'cedula', 'creado', 'expira', 'equipo'],
-  Centros: ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo', 'poligono', 'exigirQr', 'presupuestoHoras', 'presupuestoCosto'],
+  Centros: ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo', 'poligono', 'exigirQr', 'presupuestoHoras', 'presupuestoCosto', 'arlPct'],
   Jefes: ['id', 'nombre', 'cargo', 'email', 'whatsapp', 'pin', 'centros', 'activo'],
   Marcaciones: ['id', 'cedula', 'fecha', 'tipo', 'hora', 'servidor', 'lat', 'lng', 'prec', 'dist', 'enZona', 'centroId', 'foto', 'fotoExigida', 'manual', 'motivo', 'estado', 'horario', 'origen', 'editadoPor'],
-  Permisos: ['id', 'cedula', 'tipo', 'cat', 'remunerado', 'fechaSalida', 'horaSalida', 'fechaRegreso', 'horaRegreso', 'motivo', 'soporte', 'estado', 'creado', 'limite', 'firmas', 'decididoPor', 'decididoEl', 'obs'],
+  Permisos: ['id', 'cedula', 'tipo', 'cat', 'remunerado', 'fechaSalida', 'horaSalida', 'fechaRegreso', 'horaRegreso', 'motivo', 'soporte', 'estado', 'creado', 'limite', 'firmas', 'decididoPor', 'decididoEl', 'obs', 'salidaReal', 'regresoReal', 'gpsSalida', 'gpsRegreso'],
   Incapacidades: ['id', 'cedula', 'tipo', 'desde', 'hasta', 'entidad', 'nota', 'soporte', 'registradoPor', 'creado'],
   Extras: ['id', 'cedula', 'fecha', 'minCalc', 'minAprob', 'estado', 'decididoPor', 'decididoEl', 'obs'],
   Nomina: ['id', 'desde', 'hasta', 'cedula', 'nombre', 'neto', 'detalle', 'generado', 'acuse'],
@@ -33,15 +33,17 @@ var HOJAS = {
   Alertas: ['fecha', 'tipo', 'cedula', 'detalle', 'enviadoA', 'estado'],
   Auditoria: ['fecha', 'actor', 'accion', 'detalle', 'hash'],
   Errores: ['fecha', 'cedula', 'origen', 'mensaje', 'detalle', 'equipo', 'version'],
-  Prestamos: ['id', 'cedula', 'concepto', 'monto', 'cuotas', 'cuotaValor', 'pagadas', 'saldo', 'estado', 'creadoPor', 'creado'],
-  Compensatorios: ['id', 'cedula', 'fecha', 'minutos', 'tipo', 'motivo', 'creadoPor', 'creado'],
-  Comunicados: ['id', 'titulo', 'cuerpo', 'centros', 'creadoPor', 'creado', 'leidos']
+  Prestamos: ['id', 'cedula', 'concepto', 'monto', 'cuotas', 'cuotaValor', 'pagadas', 'saldo', 'estado', 'creadoPor', 'creado', 'autorizacion', 'ultimoPeriodo'],
+  Compensatorios: ['id', 'cedula', 'fecha', 'minutos', 'tipo', 'motivo', 'creadoPor', 'creado', 'soporte'],
+  Comunicados: ['id', 'titulo', 'cuerpo', 'centros', 'creadoPor', 'creado', 'leidos'],
+  Certificados: ['codigo', 'cedula', 'fecha', 'nombre', 'cargo', 'ingreso', 'retiro', 'tipoContrato', 'salario', 'estado', 'emitidoPor', 'creado', 'tipoPago'],
+  Liquidaciones: ['id', 'cedula', 'nombre', 'retiro', 'causa', 'total', 'detalle', 'registradoPor', 'creado']
 };
 
 var TIPOS_ALERTA = {
   tardanza: 'Llegada tarde', ausencia: 'No se presentó', fuera_zona: 'Marcación fuera del centro de trabajo',
   marcacion_manual: 'Marcación con hora digitada', bloqueo_permisos: 'Bloqueó la ubicación o la cámara', sin_foto: 'Marcación sin la foto exigida',
-  incompleto: 'Jornada sin salida', permiso_nuevo: 'Nueva solicitud de permiso', permiso_vencido: 'Permiso sin respuesta a tiempo',
+  incompleto: 'Jornada sin salida', permiso_nuevo: 'Nueva solicitud de permiso', permiso_vencido: 'Permiso sin respuesta a tiempo', permiso_uso: 'Salida o regreso de permiso fuera de la hora aprobada',
   permiso_resuelto: 'Permiso aprobado o rechazado', extras_tope: 'Horas extra por encima del tope legal', extras_pendientes: 'Horas extra por aprobar',
   fatiga: 'Jornada continua cerca del máximo (fatiga)', seguridad: 'Intentos de acceso sospechosos', registro_nuevo: 'Nuevo usuario por aprobar', respaldo: 'Resultado de la copia de seguridad', error_sistema: 'Error del sistema', contrato_vencimiento: 'Contrato próximo a vencer', gps_sospechoso: 'Ubicación sospechosa (posible GPS falso)', presupuesto_obra: 'Alerta de presupuesto de obra'
 };
@@ -55,7 +57,8 @@ var CFG_DEF = {
   autoRegistro: true, codigoEmpresa: '', sesionDias: 90, sesionAdminHoras: 24, admin2FA: false,
   correoAlertas: '', alertas: {},
   retencionFotosDias: 30, retencionGpsDias: 365, retencionSoportesDias: 365, archivarMeses: 12, respaldoCadaDias: 7, respaldoConservar: 8,
-  vincularDispositivo: false, alertasAgrupadas: false, telegramToken: '', telegramChatId: '',
+  vincularDispositivo: false, alertasAgrupadas: false, telegramToken: '', telegramChatId: '', telegramSinNombres: true,
+  arlPct: 0.522, exoneradoAportes: false, compensarExtras: false,
   contactosEmergencia: [],
   versionLegal: '2026-11',
   legal: {} // parámetros del motor que la empresa quiera sobrescribir
@@ -86,7 +89,8 @@ function igualSeguro_(a, b) {
   return d === 0;
 }
 function hashClave_(clave, salt) { var h = salt + '|' + clave; for (var i = 0; i < 150; i++) h = sha_(h + salt); return h; }
-function hashClaveV2_(clave, salt) { var h = hmac_(salt + '|' + clave); for (var i = 0; i < 2000; i++) h = hmac_(h + '|' + salt); return 'v2:' + h; }
+var ITER_CLAVE = 600; // medir en la cuenta real: subir si el ingreso tarda menos de 1 s
+function hashClaveV2_(clave, salt) { var h = hmac_(salt + '|' + clave); for (var i = 0; i < ITER_CLAVE; i++) h = hmac_(h + '|' + salt); return 'v2:' + h; }
 function verificarClave_(clave, salt, hash) { if (!hash) return false; return String(hash).indexOf('v2:') === 0 ? igualSeguro_(hashClaveV2_(clave, salt), hash) : igualSeguro_(hashClave_(clave, salt), hash); }
 function azar_() { return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, ''); }
 function codigo6_() { return String(parseInt(azar_().substr(0, 8), 16) % 900000 + 100000); }
@@ -109,12 +113,16 @@ function enPoligono_(lat, lng, poly) {
 }
 function codigoQrCentro_(centroId, ventana) { return hmac_('qr|' + centroId + '|' + ventana).substr(0, 6).toUpperCase(); }
 function codigoDiaCentro_(centroId, fecha) { return hmac_('qrdia|' + centroId + '|' + fecha).substr(0, 6).toUpperCase(); }
-function validarQrCentro_(centroId, entrada) {
+// Devuelve 'qr' (código rotativo vigente), 'dia' (código del día indicado) o false.
+// El código del día solo se acepta dentro de la geocerca o, sin conexión, quedando para revisión (ver a_marcar).
+function validarQrCentro_(centroId, entrada, fechaDia, msMarca) {
   var raw = txt_(entrada, 80).toUpperCase(); if (!raw) return false;
   var a = ahora_(), seg = Math.max(30, +cfg_().qrVentanaSeg || 60), w = Math.floor(a.ms / (seg * 1000));
-  if (raw === codigoDiaCentro_(centroId, a.fecha)) return true;
   var cod = raw.indexOf('CJ:') === 0 ? raw.split(':').pop() : raw;
-  return cod === codigoQrCentro_(centroId, w) || cod === codigoQrCentro_(centroId, w - 1);
+  if (cod === codigoQrCentro_(centroId, w) || cod === codigoQrCentro_(centroId, w - 1)) return 'qr';
+  if (msMarca) { var wm = Math.floor(msMarca / (seg * 1000)); for (var k = -2; k <= 1; k++) if (cod === codigoQrCentro_(centroId, wm + k)) return 'qr'; } // escaneado sin señal: vale el QR de la hora de la marca
+  if (raw === codigoDiaCentro_(centroId, fechaDia || a.fecha)) return 'dia';
+  return false;
 }
 // Contador de FALLOS (no de intentos): bloquea adivinar claves aunque el atacante cambie de cédula o de permiso.
 function fallo_(clave, seg) { var c = CacheService.getScriptCache(), k = 'fl:' + clave, n = +(c.get(k) || 0) + 1; c.put(k, String(n), seg); return n; }
@@ -186,6 +194,10 @@ function auditar_(actor, accion, detalle) {
   var prev = leer('Auditoria', 1), ant = prev.length ? (prev[0].hash || '') : 'GENESIS';
   var h = hmac_(ant + '|' + fecha + '|' + actor + '|' + accion + '|' + det).substr(0, 32);
   agregar('Auditoria', { fecha: fecha, actor: actor, accion: accion, detalle: det, hash: h });
+  try { // ancla fuera de la hoja (la primera vez cuenta las filas firmadas que ya existían)
+    var nAud = prop_('AUD_N'); if (nAud === null || nAud === undefined) { nAud = leer('Auditoria').filter(function (r) { return !!r.hash; }).length; prop_('AUD_DESDE', fecha); } else nAud = +nAud + 1;
+    prop_('AUD_N', String(nAud)); prop_('AUD_ULT', h);
+  } catch (e) { }
 }
 function correo_(para, asunto, cuerpo) {
   para = String(para || '').split(/[,; ]+/).filter(function (x) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x); });
@@ -196,7 +208,11 @@ function correo_(para, asunto, cuerpo) {
     return para.join(',');
   } catch (e) { return 'FALLÓ: ' + e.message; }
 }
-function telegram_(texto) {
+// Los mensajes se encolan y salen al terminar la petición, fuera del bloqueo: un Telegram lento no demora a nadie.
+var _colaTelegram = [];
+function telegram_(texto) { var c = cfg_(); if ((prop_('TELEGRAM_TOKEN') || c.telegramToken) && c.telegramChatId) _colaTelegram.push(texto); }
+function enviarTelegram_() { var l = _colaTelegram; _colaTelegram = []; l.forEach(telegramYa_); }
+function telegramYa_(texto) {
   var c = cfg_(), tok = prop_('TELEGRAM_TOKEN') || c.telegramToken; if (!tok || !c.telegramChatId) return;
   try {
     UrlFetchApp.fetch('https://api.telegram.org/bot' + tok + '/sendMessage', {
@@ -210,7 +226,7 @@ function alertar_(tipo, cedula, detalle) {
   var c = cfg_(), a = (c.alertas || {})[tipo] || {}, activo = a.activo !== false, para = a.correos || c.correoAlertas, enviado = '';
   var diferida = activo && para && c.alertasAgrupadas && ALERTAS_AGRUPABLES[tipo];
   var u = cedula ? buscar('Usuarios', 'cedula', cedula) : null;
-  if (activo && !diferida) telegram_((TIPOS_ALERTA[tipo] || tipo) + (u ? ' — ' + u.nombre : '') + '\n' + detalle);
+  if (activo && !diferida) telegram_((TIPOS_ALERTA[tipo] || tipo) + (u && !c.telegramSinNombres ? ' — ' + u.nombre : '') + '\n' + detalle); // Telegram está fuera del país: por defecto sin nombres
   if (activo && para && !diferida) {
     enviado = correo_(para, TIPOS_ALERTA[tipo] + (u ? ': ' + u.nombre : ''), (u ? u.nombre + ' (C.C. ' + cedula + ')\n' : '') + detalle + '\n\nFecha: ' + ahora_().iso.replace('T', ' '));
   }
@@ -226,7 +242,8 @@ function registrarError_(origen, err, extra) {
 function crearSesion_(cedula, equipo, rol) {
   var t = azar_(), a = ahora_(), c = cfg_();
   var ttl = rol === 'admin' ? Math.max(1, +c.sesionAdminHoras || 24) * 3600000 : c.sesionDias * 86400000;
-  agregar('Sesiones', { hash: sha_(t), cedula: cedula, creado: a.iso, expira: String(a.ms + ttl), equipo: txt_(equipo, 120) });
+  equipo = txt_(equipo, 120); if (rol !== 'kiosco' && equipo.indexOf('KIOSCO|') === 0) equipo = equipo.substr(7);
+  agregar('Sesiones', { hash: sha_(t), cedula: cedula, creado: a.iso, expira: String(a.ms + ttl), equipo: equipo });
   return t;
 }
 function usuarioDeToken_(t) {
@@ -235,10 +252,15 @@ function usuarioDeToken_(t) {
   if (!ced) {
     var s = buscar('Sesiones', 'hash', h);
     if (!s || +s.expira < ahora_().ms) throw E_('SESION', 'Tu sesión terminó. Ingresa de nuevo.');
-    ced = s.cedula; cache.put('ses:' + h, ced, 1800);
+    ced = s.cedula + (String(s.equipo).indexOf('KIOSCO|') === 0 ? '|' + String(s.equipo).split('|')[1] : ''); cache.put('ses:' + h, ced, 1800);
   }
-  var u = buscar('Usuarios', 'cedula', ced);
+  var partes = String(ced).split('|'), u = buscar('Usuarios', 'cedula', partes[0]);
   if (!u || (u.estado !== 'activo' && u.estado !== 'pendiente')) throw E_('SESION', 'Tu usuario no está activo. Habla con el administrador.');
+  if (partes.length > 1) { // sesión de kiosco: solo sirve para marcar en ese centro
+    var kc = centroDe_(partes[1]), alK = alcance_(u);
+    if (u.estado !== 'activo' || ['admin', 'supervisor'].indexOf(u.rol) < 0 || !kc || !kc.activo || (alK && !alK[partes[1]])) throw E_('SESION', 'Este kiosco quedó sin autorización. Un supervisor debe activarlo de nuevo.');
+    var k = {}; for (var x in u) k[x] = u[x]; k._kiosco = partes[1]; return k;
+  }
   return u;
 }
 function cerrarSesiones_(cedula, soloHash) {
@@ -267,9 +289,14 @@ function licenciaEfectiva_() {
     var base = PLANES[datos.plan] || PLANES.basico;
     var mods = base.modulos.slice();
     (datos.modulosExtra || []).forEach(function (m) { if (mods.indexOf(m) < 0) mods.push(m); });
-    var vence = String(datos.vence || '').substr(0, 10);
-    var vencida = !!(vence && /^\d{4}-\d\d-\d\d$/.test(vence) && ahora_().fecha > vence);
-    return { plan: datos.plan || 'basico', modulos: vencida ? ['asistencia'] : mods, maxUsuarios: +datos.maxUsuarios || base.maxUsuarios, vence: vence, vencida: vencida };
+    var vence = String(datos.vence || '').substr(0, 10), hoy = ahora_().fecha;
+    // La llave es de una empresa (NIT) y siempre tiene vencimiento. Tras vencer hay 15 días de gracia para cerrar nómina y renovar.
+    var nitOk = !CLAVE_LICENCIA_PROVEEDOR || (datos.nit && soloDigitos_(datos.nit) === soloDigitos_(prop_('LIC_NIT') || cfg_().empresa.nit));
+    if (CLAVE_LICENCIA_PROVEEDOR && (!/^\d{4}-\d\d-\d\d$/.test(vence) || !nitOk))
+      return { plan: 'basico', modulos: PLANES.basico.modulos.slice(), maxUsuarios: PLANES.basico.maxUsuarios, vence: vence, vencida: true, motivo: !nitOk ? 'La llave es de otra empresa (NIT distinto).' : 'La llave no tiene fecha de vencimiento.' };
+    var gracia = vence ? Motor.sumar(vence, 15) : '';
+    return { plan: datos.plan || 'basico', modulos: mods, maxUsuarios: Math.min(+datos.maxUsuarios || base.maxUsuarios, 2000), vence: vence, nit: datos.nit || '',
+      enGracia: !!(vence && hoy > vence && hoy <= gracia), vencida: !!(vence && hoy > gracia) };
   } catch (e) { return def; }
 }
 function moduloActivo_(mod) { return !mod || licenciaEfectiva_().modulos.indexOf(mod) >= 0; }
@@ -278,16 +305,13 @@ function moduloActivo_(mod) { return !mod || licenciaEfectiva_().modulos.indexOf
 var ACCIONES = {}; // nombre -> {fn, rol: 'publico' | 'usuario' | 'admin', escribe, modulo}
 function accion_(nombre, rol, escribe, fn, modulo) { ACCIONES[nombre] = { fn: fn, rol: rol, escribe: escribe, modulo: modulo || '' }; }
 
-var ACCIONES_SIEMPRE = { publico: 1, consultarCedula: 1, login: 1, salir: 1, yo: 1, adminLicenciaActivar: 1 };
+var ACCIONES_SIEMPRE = { publico: 1, consultarCedula: 1, login: 1, salir: 1, yo: 1, adminLicenciaActivar: 1, kioscoMarcar: 1, kioscoIniciar: 1, kioscoSalir: 1 };
+var ACCIONES_KIOSCO = { kioscoMarcar: 1, kioscoSalir: 1, yo: 1 }; // salir del kiosco exige la clave de un supervisor (kioscoSalir)
 function despachar_(req) {
   _c = {}; _cfg = null;
   if (!ACCIONES.publico) registrarAcciones_();
   var a = ACCIONES[req && req.a];
   if (!a) throw E_('ACCION', 'Acción desconocida.');
-  if (CLAVE_LICENCIA_PROVEEDOR && !ACCIONES_SIEMPRE[req.a]) {
-    var lic = licenciaEfectiva_();
-    if (lic.vencida) throw E_('LICENCIA_VENCIDA', 'La suscripción de esta empresa está vencida. Renueva tu plan e ingresa la nueva llave de licencia para continuar.');
-  }
   if (a.modulo && !moduloActivo_(a.modulo)) throw E_('MODULO_NO_INCLUIDO', 'El módulo "' + a.modulo + '" no está incluido en tu plan actual.');
   var lock = null;
   if (a.escribe) { lock = LockService.getScriptLock(); if (!lock.tryLock(25000)) throw E_('OCUPADO', 'El sistema está ocupado. Intenta de nuevo en unos segundos.'); }
@@ -295,11 +319,16 @@ function despachar_(req) {
     var u = null;
     if (a.rol !== 'publico') {
       u = usuarioDeToken_(req.t);
+      if (u._kiosco && !ACCIONES_KIOSCO[req.a]) throw E_('PERMISO', 'Esta tablet está en modo kiosco: solo sirve para marcar.');
+      if (!u._kiosco && req.a === 'kioscoMarcar') throw E_('PERMISO', 'Primero activa el modo kiosco en esta tablet.');
       if (a.rol === 'supervisor' && (['admin', 'supervisor'].indexOf(u.rol) < 0 || u.estado !== 'activo')) throw E_('PERMISO', 'Esta acción es solo para supervisores y administradores.');
       if (a.rol === 'admin' && (u.rol !== 'admin' || u.estado !== 'activo')) throw E_('PERMISO', 'Esta acción es solo para administradores.');
+      // Suscripción vencida: el panel queda en solo lectura. Nadie pierde acceso a sus datos y el personal sigue marcando.
+      if (CLAVE_LICENCIA_PROVEEDOR && a.escribe && (a.rol === 'admin' || a.rol === 'supervisor') && !ACCIONES_SIEMPRE[req.a] && licenciaEfectiva_().vencida)
+        throw E_('LICENCIA_VENCIDA', 'La suscripción está vencida: el panel quedó en modo consulta. Ingresa la nueva llave de licencia en Configuración → Licencia para volver a editar.');
     }
     return { ok: true, d: a.fn(req.d || {}, u, req) };
-  } finally { if (lock) lock.releaseLock(); }
+  } finally { if (lock) lock.releaseLock(); try { enviarTelegram_(); } catch (e) { } }
 }
 function doPost(e) {
   var out, req = null;

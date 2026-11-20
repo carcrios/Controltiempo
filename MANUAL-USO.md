@@ -72,3 +72,47 @@ Desde tu hoja privada con `PanelProveedor.gs` controlas a todos tus clientes:
 
 * **Si un cliente paga o renueva:** en tu hoja `Clientes`, seleccionas su fila → **Panel de Proveedor → 3. Renovar cliente (+30 días)** → le envías la nueva llave por WhatsApp.
 * **Si un cliente deja de pagar:** al pasar la fecha de vencimiento, la aplicación **se bloquea automáticamente** y solo permite al administrador ingresar para pegar la nueva llave de renovación.
+
+## Novedades de la versión 1.7
+
+**Trabajador — pestaña «Más».** Mi horario de la semana, comunicados de la empresa (con confirmación de lectura),
+préstamos y días compensatorios, mis horas extra, reportar una incapacidad con foto del soporte, certificado
+laboral (se imprime y trae un código que cualquiera verifica en la página de la empresa, opción «verificar»),
+contactos de emergencia y «cerrar sesión en todos mis celulares». En «Pago», cada desprendible tiene el botón
+«Confirmar recibido».
+
+**Panel del administrador.**
+- *En vivo*: quién está trabajando en cada obra en este momento.
+- *Modo kiosco*: convierte una tablet en marcador de portería para un centro (cédula + contraseña + foto). Al activarlo se
+  cierra tu sesión en ese equipo. Solo marcan las personas asignadas a ese centro. Para apagarlo, «Salir del kiosco» pide
+  la cédula y contraseña de un supervisor del centro o de un administrador.
+- *Centros de trabajo → QR*: QR que cambia solo cada minuto; si activas «Exigir QR», el trabajador debe
+  escanearlo en la obra. También se puede dibujar el polígono de la obra y fijar un presupuesto de horas y costo.
+- *Préstamos y compensatorios*: cada préstamo exige la foto de la autorización firmada. La cuota se descuenta sola al cerrar
+  la nómina, sin dejar a la persona por debajo del mínimo vital ni descontar más del 50 % del neto; lo que falte pasa al
+  periodo siguiente. Los abonos de compensatorio exigen la foto del acuerdo y el descanso se paga como permiso remunerado.
+  Abonar horas extra a compensatorio viene apagado (Configuración → Reglas): el Ministerio del Trabajo considera que se pagan.
+- *Comunicados*: mensajes a toda la empresa, a una obra o a un cargo, con informe de quién los leyó.
+- *Nómina → Provisiones*: prestaciones y aportes del empleador (la tarifa de ARL se fija por empresa y por obra; la
+  exoneración de salud, SENA e ICBF viene apagada: actívala solo si tu contador lo confirma).
+- *Nómina → Liquidación de contrato*: elige persona, fecha y causa. Calcula salario pendiente, cesantías, intereses, prima,
+  vacaciones e indemnización. «Registrar e imprimir para firma» la guarda (una vez por persona, con retiro de hoy o antes),
+  deja a la persona inactiva, la saca de la nómina de esa quincena y salda el préstamo descontado.
+- *Personal → Expediente*: todo lo de una persona en una sola hoja. *Personal → Trasladar*: mover a varias
+  personas de obra a la vez.
+- *Configuración → Seguridad*: celular vinculado, código por correo para administradores, precisión de GPS,
+  foto en marcaciones dudosas. *Configuración → Licencia*: plan y llave.
+- *Alertas*: resumen por hora y Telegram opcional. *Sistema → Verificar auditoría*: confirma que nadie editó
+  a mano el registro de cambios.
+
+## Accesibilidad y dictado
+- El ícono de accesibilidad (figura humana) está arriba a la derecha en todas las pantallas, también en el ingreso y en el kiosco. En el celular del trabajador también está en Perfil.
+- Opciones: tamaño de letra, alto contraste (útil a pleno sol), leer los avisos en voz alta, reducir el movimiento, subrayar enlaces y usar siempre el tema claro. Se guardan en ese equipo.
+- Dictar: toca el micrófono al lado de cualquier casilla de texto, habla y toca otra vez para terminar. Funciona en Chrome y Edge (Android y computador) y en Safari del iPhone; la primera vez el navegador pide permiso para el micrófono. Si el navegador no lo permite, el micrófono del teclado del celular sirve igual.
+- El kiosco confirma en voz alta cada marcación («Pedro, Entrada registrada a las 06:55»).
+
+## Salir a un permiso aprobado
+- El día del permiso, al trabajador le aparece arriba de su jornada «Tienes un permiso aprobado hoy» con el botón **Salir a mi permiso**. Confirma, y queda guardada la hora real de salida con su ubicación.
+- Si el permiso es por horas (vuelve el mismo día), el botón cambia a **Regresé del permiso**; al tocarlo se guarda la hora de regreso.
+- Si no vuelve ese día, la salida a permiso también marca la salida de la jornada.
+- Si sale antes de la hora aprobada o regresa tarde, llega la alerta «Salida o regreso de permiso fuera de la hora aprobada». En el panel, Permisos muestra la columna «Uso real».

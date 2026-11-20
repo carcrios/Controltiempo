@@ -115,3 +115,19 @@ Con `ENLACE=1 node tests/servidor-local.js` se prueba la conexión por enlace: a
 | Tope de horas extra | 2 por día, 12 por semana | Ley 50 de 1990 |
 | Salario mínimo / auxilio de transporte 2026 | $1.750.905 / $249.095 | Decretos de 2025 |
 | Festivos | Calculados cada año | Ley 51 de 1983 |
+
+
+## Licencia y planes
+
+Cada empresa recibe una llave de licencia (Configuración → Licencia) que indica el plan, el número de personas,
+los módulos y la fecha de vencimiento. Cuando vence, los trabajadores siguen marcando con normalidad y el panel
+queda en modo consulta: se puede ver y descargar todo, pero no aprobar ni cambiar nada hasta pegar una llave nueva.
+
+Para emitir llaves: pon tu clave secreta en `CLAVE_LICENCIA_PROVEEDOR` (apps-script/Base.gs) antes de empaquetar y genera cada llave con
+`CLAVE=<tu clave> node herramientas/llave-licencia.js empresa <NIT del cliente> 2027-12-31`. La llave queda atada a ese NIT y siempre vence;
+después del vencimiento hay 15 días de gracia. Si dejas la clave vacía, la instalación tiene todos los módulos sin llave.
+
+Aclaración honesta: el código se instala en la cuenta de Google del cliente, así que alguien con conocimientos
+técnicos podría modificarlo. La llave es un recordatorio y un control de planes, no una cerradura. La protección
+real es el contrato de licencia de uso (ver la página de propiedad intelectual) y el soporte y las
+actualizaciones, que solo recibe quien tiene la licencia al día.

@@ -1,15 +1,17 @@
+import { PanelAccesibilidad } from './a11y.jsx';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SwipeToConfirm } from '@elizabthpazp/intera-ui';
-import { Bell, CalendarDays, Camera, Check, Clock, Download, FileText, History, KeyRound, LogOut, MapPin, MessageCircle, Plus, Printer, ArrowLeft, UserRound, Wallet } from 'lucide-react';
+import { Bell, CalendarDays, Camera, Check, Clock, Download, FileText, History, KeyRound, LogOut, MapPin, MessageCircle, Plus, Printer, ArrowLeft, UserRound, Wallet, LayoutGrid, QrCode, ScanLine, CheckCircle2, CalendarCheck, LogIn } from 'lucide-react';
 import { api, bandeja, reintentable, reloj } from './api.js';
 import { Aviso, Boton, Campo, Estado, Hoja, Insignia, Tarjeta, Vacio, useAvisos, useCarga, useForm, useOscuro, Confirmar } from './ui.jsx';
-import { ErrorPermiso, NOMBRE_TIPO, CORTO_TIPO, TIPOS, ahoraISO, comoPermitir, comprimir, comprimirArchivo, fechaCorta, fechaLarga, horas, horasDec, hoyISO, idNuevo, notificacionesActivas, pedirNotificaciones, pesos, programarRecordatorios, sumarDias, ubicar } from './util.js';
+import { ErrorPermiso, NOMBRE_TIPO, CORTO_TIPO, TIPOS, ahoraISO, comoPermitir, comprimir, comprimirArchivo, fechaCorta, fechaLarga, horas, horasDec, hoyISO, idNuevo, notificacionesActivas, pedirNotificaciones, pesos, programarRecordatorios, sumarDias, ubicar, saludo } from './util.js';
 import { DetallePermiso, nombreEstado, tonoPermiso } from './Firma.jsx';
 import { PieLegal } from './Legal.jsx';
 import { rangoRapido } from './Informes.jsx';
+import Mas, { tiene } from './Autoservicio.jsx';
 
 /* ---------- Cámara: la foto se toma en el momento y se comprime en el celular ---------- */
-function Camara({ tipo, alTerminar }) {
+export function Camara({ tipo, alTerminar }) {
   const video = useRef(null), flujo = useRef(null), [lista, setLista] = useState(false), [error, setError] = useState('');
   useEffect(() => {
     let vivo = true;
@@ -43,19 +45,20 @@ function Reloj() {
 function Inicio({ yo, actualizar, recargar }) {
   const { resumen, centros, usuario, cfg } = yo, avisos = useAvisos(), oscuro = useOscuro();
   const [fase, setFase] = useState(null), [vuelta, setVuelta] = useState(0), [bloqueo, setBloqueo] = useState(null), [camara, setCamara] = useState(null), [olvido, setOlvido] = useState(false), [detalle, setDetalle] = useState(false);
-  const [centroSel, setCentroSel] = useState(yo.hoy.centroId || usuario.centroId || ''), [pend, setPend] = useState(() => bandeja.lista().length), [rech, setRech] = useState(() => bandeja.rechazadas());
+  const [centroSel, setCentroSel] = useState(yo.hoy.centroId || usuario.centroId || ''), [pend, setPend] = useState(() => bandeja.mias(usuario.cedula).length), [rech, setRech] = useState(() => bandeja.rechazadas(usuario.cedula));
   // Estado del día: si lo guardado es de ayer (se abrió sin señal) se empieza un día nuevo, y se superpone lo que espera en la bandeja.
   const hoy = useMemo(() => {
     let h = yo.hoy; const abierta = h.marcas?.entrada && !h.marcas?.salida;
     if (h.fecha !== hoyISO() && !abierta) h = { ...h, fecha: hoyISO(), marcas: {}, fotoPlan: {}, festivo: false, viejo: true };
-    const marcas = { ...h.marcas }; bandeja.lista().forEach((m) => { if (!m.manual && m.hora.slice(0, 10) >= h.fecha && !marcas[m.tipo]) marcas[m.tipo] = m.hora.slice(11); });
+    const marcas = { ...h.marcas }; bandeja.mias(usuario.cedula).forEach((m) => { if (!m.manual && m.hora.slice(0, 10) >= h.fecha && !marcas[m.tipo]) marcas[m.tipo] = m.hora.slice(11); });
     return { ...h, marcas, siguiente: !marcas.entrada ? 'entrada' : marcas.salida ? null : !marcas.sal_alm ? 'sal_alm' : !marcas.ent_alm ? 'ent_alm' : 'salida' };
   }, [yo.hoy, pend]);
   const pedirFoto = (tipo) => new Promise((ok) => setCamara({ tipo, ok }));
+  const [qr, setQr] = useState(null), pedirQr = () => new Promise((ok) => setQr({ ok }));
 
   const enviarPendientes = useCallback(async () => {
-    if (!bandeja.lista().length || !navigator.onLine) return;
-    const r = await bandeja.enviar(); setPend(r.pendientes); setRech(bandeja.rechazadas());
+    if (!bandeja.mias(usuario.cedula).length || !navigator.onLine) return;
+    const r = await bandeja.enviar(); setPend(r.pendientes); setRech(bandeja.rechazadas(usuario.cedula));
     if (r.enviadas) { avisos.ok(`${r.enviadas} marcación(es) guardada(s) en tu celular ya se enviaron.`); recargar(); }
     if (r.rechazadas.length) avisos.error('Una marcación guardada no fue aceptada. Mira el aviso en esta pantalla.', 10000);
   }, [avisos, recargar]);
@@ -66,13 +69,45 @@ function Inicio({ yo, actualizar, recargar }) {
   }, [enviarPendientes, pend]);
   useEffect(() => { programarRecordatorios(hoy, cfg.recordatorioMin); }, [hoy, cfg.recordatorioMin]);
 
+  const reintentando = useRef(false);
+  async function reintentarRech(r) {
+    if (reintentando.current) return; reintentando.current = true;
+    try {
+      let extra = {};
+      if (r.codRechazo === 'QR_REQUERIDO') { const c = await pedirQr(); if (!c) return; extra = { qrCodigo: c }; }
+      const m = await bandeja.reintentar(r.id, extra); if (!m) return;
+      setFase('enviando');
+      try { const x = await api('marcar', { ...m, offline: true }); bandeja.descartarRechazada(r.id); actualizar({ hoy: x.hoy, resumen: x.resumen }); avisos.ok(`${NOMBRE_TIPO[m.tipo]} de las ${m.hora.slice(11)} quedó registrada.`); }
+      catch (e) {
+        if (reintentable(e)) { await bandeja.agregar(m); bandeja.descartarRechazada(r.id); setPend(bandeja.mias(usuario.cedula).length); avisos.info('Sin señal: quedó en la bandeja de tu celular y se enviará sola.'); }
+        else avisos.error(e);
+      }
+      setRech(bandeja.rechazadas(usuario.cedula));
+    } finally { setFase(null); reintentando.current = false; }
+  }
+  const [confPerm, setConfPerm] = useState(false);
+  async function usarPermiso() {
+    const p = hoy.permiso; if (!p) return; setConfPerm(false);
+    setBloqueo(null); setFase('gps'); let pos;
+    try { pos = await ubicar(); }
+    catch (e) { setFase(null); const b = e instanceof ErrorPermiso ? e : new ErrorPermiso('gps', 'No se pudo obtener la ubicación.', false); setBloqueo(b); return; }
+    setFase('enviando');
+    try {
+      const r = await api(p.fase === 'salir' ? 'permisoSalir' : 'permisoRegresar', { id: p.id, ...pos });
+      actualizar({ hoy: r.hoy, resumen: r.resumen });
+      avisos.ok(p.fase === 'salir'
+        ? `Salida a tu permiso registrada a las ${r.hora}.${r.cerroJornada ? ' Tu jornada de hoy quedó cerrada.' : r.regresaHoy ? ' Cuando vuelvas, toca «Regresé del permiso».' : ''}`
+        : `Regreso del permiso registrado a las ${r.hora}.${r.tarde > 0 ? ` Llegaste ${r.tarde} min después de lo aprobado.` : ''}`, 8000);
+    } catch (e) { if (reintentable(e)) avisos.error('Sin conexión: el uso del permiso necesita señal. Intenta de nuevo en un momento.'); else avisos.error(e); }
+    finally { setFase(null); }
+  }
   async function marcar(tipo, extra = {}) {
     const fin = () => { setFase(null); setVuelta((v) => v + 1); };
     setBloqueo(null); setFase('gps');
     let pos;
     try { pos = await ubicar(); }
     catch (e) { fin(); const b = e instanceof ErrorPermiso ? e : new ErrorPermiso('gps', 'No se pudo obtener la ubicación.', false); setBloqueo(b); if (extra.manual) avisos.error(b.message, 12000); if (e.bloqueado) api('bloqueo', { que: 'gps', tipo }).catch(() => {}); return false; }
-    const m = { id: idNuevo(), tipo, ...pos, centroId: centroSel, hora: ahoraISO(reloj.ahora()), ...extra };
+    const m = { id: idNuevo(), cedula: usuario.cedula, tipo, ...pos, centroId: centroSel, hora: ahoraISO(reloj.ahora()), ...extra };
     const tomar = async () => {
       setFase('foto'); const { foto, motivo } = await pedirFoto(tipo);
       if (!foto) { fin(); const avisa = motivo !== 'falla'; // una falla técnica de la cámara no se reporta como bloqueo
@@ -80,7 +115,9 @@ function Inicio({ yo, actualizar, recargar }) {
       m.foto = foto; return true;
     };
     if (!extra.manual && hoy.fotoPlan?.[tipo] && !(await tomar())) return false;
-    for (let intento = 0; intento < 2; intento++) {
+    // Obra con QR: se pide antes de enviar, para que la marcación también sirva si queda guardada sin señal
+    if (!extra.manual && !m.qrCodigo && yo.centros?.find((c) => c.id === centroSel)?.exigirQr) { setFase('qr'); const c = await pedirQr(); if (!c) { fin(); return false; } m.qrCodigo = c; }
+    for (let intento = 0; intento < 3; intento++) {
       setFase('enviando');
       try {
         const r = await api('marcar', m); actualizar({ hoy: r.hoy, resumen: r.resumen }); fin();
@@ -88,8 +125,10 @@ function Inicio({ yo, actualizar, recargar }) {
         if (navigator.vibrate) navigator.vibrate(120); return true;
       } catch (e) {
         if (e.cod === 'FOTO_REQUERIDA' && !m.foto) { if (!(await tomar())) return false; continue; }
+        if (e.cod === 'QR_REQUERIDO' && !m.qrCodigo) { setFase('qr'); const c = await pedirQr(); if (!c) { fin(); return false; } m.qrCodigo = c; continue; }
         if (reintentable(e)) {
-          bandeja.agregar(m); setPend(bandeja.lista().length);
+          const guardada = await bandeja.agregar(m); setPend(bandeja.mias(usuario.cedula).length);
+          if (!guardada) { fin(); avisos.error('Sin señal y el celular no tiene espacio para guardar la marcación. Libera espacio o marca con «Se me olvidó marcar» cuando vuelva la señal.', 12000); return false; }
           if (!extra.manual) { const marcas = { ...hoy.marcas, [tipo]: m.hora.slice(11) }; actualizar({ hoy: { ...hoy, marcas, siguiente: tipo === 'salida' ? null : TIPOS[TIPOS.indexOf(tipo) + 1] } }); }
           fin(); avisos.info(`${e.cod === 'OCUPADO' ? 'El servidor está ocupado' : 'Sin señal'}: “${NOMBRE_TIPO[tipo]}” de las ${m.hora.slice(11)} quedó guardada en tu celular y se enviará sola en un momento.`, 8000); return true;
         }
@@ -100,9 +139,23 @@ function Inicio({ yo, actualizar, recargar }) {
   }
 
   const sig = hoy.siguiente, m = hoy.marcas || {}, ocupado = !!fase, h = hoy.horario;
-  const textoFase = { gps: 'Obteniendo tu ubicación…', foto: 'Esperando la foto…', enviando: 'Registrando…' }[fase];
+  const textoFase = { gps: 'Obteniendo tu ubicación…', foto: 'Esperando la foto…', qr: 'Esperando el código de la obra…', enviando: 'Registrando…' }[fase];
   return <div className="pila">
+    {hoy.permiso && <section className={`permiso-hoy ${hoy.permiso.fase}`} aria-label="Permiso aprobado para hoy">
+      <div className="fila" style={{ gap: 10, alignItems: 'flex-start' }}><CalendarCheck size={26} aria-hidden="true" style={{ flex: 'none', marginTop: 2 }} />
+        <div className="crece"><strong>{hoy.permiso.fase === 'salir' ? 'Tienes un permiso aprobado hoy' : 'Estás en tu permiso'}</strong>
+          <div>{hoy.permiso.tipoNombre}</div>
+          <div className="chico">{hoy.permiso.fase === 'salir'
+            ? <>Sales {hoy.permiso.horaSalida ? `a las ${hoy.permiso.horaSalida}` : 'hoy'} · {hoy.permiso.regresaHoy ? `regresas hoy a las ${hoy.permiso.horaRegreso}` : `regresas el ${fechaCorta(hoy.permiso.fechaRegreso)}${hoy.permiso.horaRegreso ? ` a las ${hoy.permiso.horaRegreso}` : ''}`}</>
+            : <>Saliste a las {hoy.permiso.salidaReal} · debes regresar a las {hoy.permiso.horaRegreso}</>}</div></div></div>
+      <Boton ancho icono={hoy.permiso.fase === 'salir' ? LogOut : LogIn} disabled={!!fase} cargando={fase === 'enviando'} onClick={() => (hoy.permiso.fase === 'salir' ? setConfPerm(true) : usarPermiso())}>
+        {hoy.permiso.fase === 'salir' ? 'Salir a mi permiso' : 'Regresé del permiso'}</Boton>
+    </section>}
+    <Confirmar abierta={confPerm} titulo="Salir a tu permiso" texto="Sí, salir ahora" alConfirmar={usarPermiso} alCerrar={() => setConfPerm(false)}>
+      {hoy.permiso && <>Vas a registrar que sales ahora a tu permiso de <strong>{hoy.permiso.tipoNombre}</strong>. {hoy.permiso.regresaHoy ? 'Cuando vuelvas, toca «Regresé del permiso».' : hoy.permiso && hoy.marcas?.entrada && !hoy.marcas?.salida ? 'Como no regresas hoy, también se marca tu salida del día.' : ''} Se guarda la hora y tu ubicación.</>}
+    </Confirmar>
     <section className="reloj-tarjeta" aria-label="Tarjeta de tiempo de hoy">
+      <p className="saludo">{saludo()}, {usuario.nombre.split(' ')[0]}</p>
       <div className="fila entre"><span className="fecha">{fechaLarga(hoy.fecha)}{hoy.festivo ? ' · festivo' : ''}</span>{h && <span className="chico" style={{ opacity: .85 }}>Horario {h.e}–{h.s}</span>}</div>
       <Reloj />
       <ol className="riel" aria-label="Marcaciones de la jornada">{TIPOS.map((t) => { const omit = !m[t] && TIPOS.some((x) => TIPOS.indexOf(x) > TIPOS.indexOf(t) && m[x]);
@@ -113,28 +166,32 @@ function Inicio({ yo, actualizar, recargar }) {
             <select className="entrada" style={{ width: 'auto', minHeight: 36, maxWidth: 220 }} value={centroSel} onChange={(e) => setCentroSel(e.target.value)}>{centros.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}</select></label>}
           {ocupado ? <div className="fila" role="status" aria-live="polite" style={{ minHeight: 68 }}><span className="giro" aria-hidden="true" /><span className="que">{textoFase}</span></div>
             : <div className="desliza" style={{ width: '100%', display: 'grid', placeItems: 'center' }}><SwipeToConfirm key={vuelta + sig} label={`Desliza: ${NOMBRE_TIPO[sig].toLowerCase()}`} successLabel="Un momento…" allowReset={false} darkMode={oscuro} onConfirm={() => marcar(sig)} /></div>}
-          {!ocupado && <div className="fila" style={{ justifyContent: 'center' }}>
-            <Boton variante="texto" chico onClick={() => marcar(sig)}>Marcar con un toque</Boton>
-            {sig === 'sal_alm' && <Boton variante="texto" chico onClick={() => marcar('salida')}>Marcar salida del día</Boton>}
-            {sig === 'ent_alm' && <Boton variante="texto" chico onClick={() => marcar('salida')}>No regreso: marcar salida</Boton>}
-          </div>}
         </> : <p className="que" role="status">Jornada de hoy completa. ¡Buen descanso!</p>}
+        {!ocupado && <details className="otras">
+          <summary>¿No puedes deslizar? Otras opciones</summary>
+          <div className="pila junta">
+            {sig && <Boton variante="secundario" onClick={() => marcar(sig)}>{NOMBRE_TIPO[sig]} con un toque</Boton>}
+            {sig === 'sal_alm' && <Boton variante="secundario" onClick={() => marcar('salida')}>Salir por hoy (sin almuerzo)</Boton>}
+            {sig === 'ent_alm' && <Boton variante="secundario" onClick={() => marcar('salida')}>No regreso: marcar salida</Boton>}
+            <Boton variante="secundario" icono={History} onClick={() => setOlvido({ tipo: sig || 'salida', fecha: hoy.fecha })}>Se me olvidó marcar</Boton>
+          </div></details>}
       </div>
     </section>
 
     {bloqueo && <Aviso tono="peligro"><strong>{bloqueo.que === 'camara' ? 'Falta la foto' : 'Falta la ubicación'}.</strong> {bloqueo.message}{bloqueo.bloqueado && ' Se avisó al administrador de este intento.'}</Aviso>}
     {hoy.viejo && <Aviso tono="aviso">No se pudo actualizar con el servidor. Puedes marcar: se guardará en tu celular.</Aviso>}
     {rech.map((m) => <Aviso key={m.id} tono="peligro"><strong>No se aceptó “{NOMBRE_TIPO[m.tipo]}” del {fechaCorta(m.hora)} a las {m.hora.slice(11)}.</strong> {m.rechazo} Si de verdad marcaste a esa hora, regístrala con «Se me olvidó marcar» o pide el ajuste al administrador.
-      <div className="fila" style={{ marginTop: 8 }}><Boton chico variante="secundario" onClick={() => { setOlvido({ tipo: m.tipo, fecha: m.hora.slice(0, 10) }); }}>Registrarla ahora</Boton><Boton chico variante="texto" onClick={() => { bandeja.descartarRechazada(m.id); setRech(bandeja.rechazadas()); }}>Descartar</Boton></div></Aviso>)}
+      <div className="fila" style={{ marginTop: 8 }}><Boton chico onClick={() => reintentarRech(m)}>{m.codRechazo === 'QR_REQUERIDO' ? 'Escanear el QR y reintentar' : 'Reintentar'}</Boton><Boton chico variante="secundario" onClick={() => { setOlvido({ tipo: m.tipo, fecha: m.hora.slice(0, 10) }); }}>Registrarla con otra hora</Boton><Boton chico variante="texto" onClick={() => { bandeja.descartarRechazada(m.id); setRech(bandeja.rechazadas(usuario.cedula)); }}>Descartar</Boton></div></Aviso>)}
     {pend > 0 && <Aviso tono="aviso"><strong>{pend} marcación(es) por enviar.</strong> Están guardadas en este celular; se envían solas al volver la señal. <Boton chico variante="secundario" onClick={enviarPendientes}>Enviar ahora</Boton></Aviso>}
     {resumen.incompletos?.length > 0 && <Aviso tono="aviso"><strong>Te faltó marcar la salida</strong> el {resumen.incompletos.map(fechaCorta).join(', ')}. Mientras no la completes, ese día no suma horas. <Boton chico variante="secundario" onClick={() => setOlvido({ tipo: 'salida', fecha: resumen.incompletos[0] })}>Poner la hora en que salí</Boton></Aviso>}
-    <Boton variante="secundario" icono={History} onClick={() => setOlvido({ tipo: sig || 'salida', fecha: hoy.fecha })}>Se me olvidó marcar</Boton>
 
     <Tarjeta titulo="Lo que llevas este periodo" accion={<span className="suave chico">{fechaCorta(resumen.periodo.desde)} – {fechaCorta(resumen.periodo.hasta)}</span>}>
-      <div className="rejilla">
-        <div className="dato-grande"><span className="suave chico">Horas trabajadas</span><span className="valor xl">{horasDec(resumen.horas.trabajadas)}</span></div>
-        <div className="dato-grande"><span className="suave chico">Llevas ganado (neto estimado)</span><span className="valor xl" style={{ color: 'var(--c-ok)' }}>{pesos(resumen.neto)}</span></div>
-      </div>
+      <div className="plata"><span className="suave chico">Llevas ganado (neto estimado)</span><span className="plata-valor">{pesos(resumen.neto)}</span></div>
+      {(() => { const d0 = new Date(resumen.periodo.desde + 'T12:00:00'), d1 = new Date(resumen.periodo.hasta + 'T12:00:00'), hoyD = new Date(hoy.fecha + 'T12:00:00');
+        const total = Math.round((d1 - d0) / 864e5) + 1, va = Math.min(total, Math.max(0, Math.round((hoyD - d0) / 864e5) + 1));
+        return <div className="avance" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={va} aria-label={`Día ${va} de ${total} del periodo`}>
+          <div className="avance-barra"><span style={{ width: `${(va / total) * 100}%` }} /></div>
+          <div className="fila entre chico suave"><span>Día {va} de {total}</span><span>{horasDec(resumen.horas.trabajadas)} trabajadas</span></div></div>; })()}
       <p className="suave chico" style={{ marginTop: 12 }}>Si completas el periodo sin novedades te pueden llegar cerca de <strong className="num" style={{ color: 'var(--c-texto)' }}>{pesos(resumen.proyeccion)}</strong>. Es un estimado; el valor oficial es el del desprendible.{!usuario.salarioOk && ' Tu salario aún no ha sido validado por el administrador.'}</p>
       <div className="fila" style={{ marginTop: 12 }}>
         {resumen.horas.extras > 0 && <Insignia tono="ok">{horasDec(resumen.horas.extras)} extra aprobadas</Insignia>}
@@ -148,6 +205,7 @@ function Inicio({ yo, actualizar, recargar }) {
     <MisJornadas resumen={resumen} />
 
     {camara && <Camara tipo={camara.tipo} alTerminar={(foto, motivo) => { camara.ok({ foto, motivo }); setCamara(null); }} />}
+    <PedirQr abierta={!!qr} alTerminar={(c) => { qr?.ok(c); setQr(null); }} />
     <Olvido abierta={!!olvido} inicial={olvido || {}} cfg={cfg} hoy={hoy} alCerrar={() => setOlvido(false)} alEnviar={async (d) => { const ok = await marcar(d.tipo, { manual: true, fecha: d.fecha, hora: `${d.fechaHora}T${d.hora}`, motivo: d.motivo }); if (ok) { setOlvido(false); recargar(); } }} ocupado={ocupado} />
     <Hoja abierta={detalle} alCerrar={() => setDetalle(false)} titulo="Cómo se calcula tu estimado"><Liquidacion l={resumen} /><p className="suave chico">Valor de tu hora ordinaria: {pesos(resumen.valorHora)} (salario ÷ divisor mensual vigente). Las horas extra solo se pagan cuando el administrador las aprueba.</p></Hoja>
   </div>;
@@ -170,6 +228,28 @@ function Olvido({ abierta, inicial, cfg, hoy, alCerrar, alEnviar, ocupado }) {
   </Hoja>;
 }
 
+/* Código de la obra: escaneo del QR con la cámara (si el navegador lo permite) o el código escrito */
+function PedirQr({ abierta, alTerminar }) {
+  const [v, setV] = useState(''), [esc, setEsc] = useState(false), video = useRef(null), puede = typeof window !== 'undefined' && 'BarcodeDetector' in window;
+  useEffect(() => { if (!abierta) { setV(''); setEsc(false); } }, [abierta]);
+  useEffect(() => {
+    if (!esc) return; let flujo, vivo = true, t;
+    (async () => { try {
+      flujo = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }); video.current.srcObject = flujo; await video.current.play();
+      const det = new window.BarcodeDetector({ formats: ['qr_code'] });
+      const mirar = async () => { if (!vivo) return; try { const r = await det.detect(video.current); if (r[0]?.rawValue) { alTerminar(r[0].rawValue); return; } } catch { /* sigue */ } t = setTimeout(mirar, 300); }; mirar();
+    } catch { setEsc(false); } })();
+    return () => { vivo = false; clearTimeout(t); flujo?.getTracks().forEach((x) => x.stop()); };
+  }, [esc]); // eslint-disable-line
+  return <Hoja abierta={abierta} alCerrar={() => alTerminar(null)} titulo="Código de la obra" alto={0.7}>
+    <p className="suave">Esta obra pide el código QR de portería o el código del día que te da tu supervisor.</p>
+    {esc ? <video ref={video} playsInline muted style={{ width: '100%', borderRadius: 12, background: '#000', maxHeight: 280, objectFit: 'cover' }} aria-label="Cámara para leer el QR" />
+      : puede && <Boton variante="secundario" icono={ScanLine} onClick={() => setEsc(true)}>Escanear el QR</Boton>}
+    <Campo etiqueta="O escribe el código" autoCapitalize="characters" autoComplete="off" maxLength={40} value={v} onChange={(e) => setV(e.target.value.toUpperCase())} />
+    <div className="acciones-hoja"><Boton variante="secundario" onClick={() => alTerminar(null)}>Cancelar</Boton><Boton icono={QrCode} disabled={v.trim().length < 4} onClick={() => alTerminar(v.trim())}>Usar código</Boton></div>
+  </Hoja>;
+}
+
 export function Liquidacion({ l }) {
   return <div>
     {l.conceptos.map((c, i) => <div className="concepto" key={i}><span>{c.concepto}</span><span className="cant num">{c.cantidad}</span><span className={`num ${c.valor < 0 ? 'neg' : ''}`}>{pesos(c.valor)}</span></div>)}
@@ -179,10 +259,13 @@ export function Liquidacion({ l }) {
   </div>;
 }
 
-export function Desprendible({ n, alVolver }) {
-  const d = n.detalle, p = d.persona || {}, e = d.empresa || {};
+export function Desprendible({ n, alVolver, confirmable }) {
+  const d = n.detalle, p = d.persona || {}, e = d.empresa || {}, [acuse, setAcuse] = useState(n.acuse || ''), [c, setC] = useState(false), avisos = useAvisos();
+  const confirmar = async () => { setC(true); try { const r = await api('confirmarDesprendible', { id: n.id }); setAcuse(r.acuse); n.acuse = r.acuse; avisos.ok('Recibido confirmado.'); } catch (x) { avisos.error(x); } finally { setC(false); } };
   return <div className="pila">
     <div className="fila entre no-imprimir"><Boton variante="texto" icono={ArrowLeft} onClick={alVolver}>Volver</Boton><Boton variante="secundario" icono={Printer} onClick={() => window.print()}>Imprimir o guardar PDF</Boton></div>
+    {acuse ? <Aviso tono="ok">Recibido{confirmable ? '' : ' por el trabajador'} el {fechaLarga(acuse)} a las {acuse.slice(11, 16)}.</Aviso>
+      : confirmable ? <Aviso>Revisa los valores. Si están bien, confirma que recibiste el desprendible. <Boton chico icono={CheckCircle2} cargando={c} onClick={confirmar}>Confirmar recibido</Boton></Aviso> : <Aviso tono="aviso">El trabajador aún no confirma el recibido.</Aviso>}
     <Tarjeta>
       <div className="fila entre" style={{ alignItems: 'flex-start', marginBottom: 16 }}><div><h2>Desprendible de pago</h2><p className="suave">{e.nombre}{e.nit ? ` · NIT ${e.nit}` : ''}</p></div><div className="derecha"><strong>{fechaCorta(n.desde)} – {fechaCorta(n.hasta)}</strong><div className="suave chico">Generado {fechaCorta(n.generado)}</div></div></div>
       <div className="rejilla" style={{ marginBottom: 16 }}>
@@ -197,11 +280,11 @@ export function Desprendible({ n, alVolver }) {
 
 function Pagos({ yo }) {
   const carga = useCarga(() => api('desprendibles'), []), [sel, setSel] = useState(null);
-  if (sel) return <Desprendible n={sel} alVolver={() => setSel(null)} />;
+  if (sel) return <Desprendible n={sel} confirmable={tiene(yo, 'nomina')} alVolver={() => setSel(null)} />;
   return <div className="pila">
     <Tarjeta titulo="Periodo en curso (estimado)" accion={<span className="suave chico">{fechaCorta(yo.resumen.periodo.desde)} – {fechaCorta(yo.resumen.periodo.hasta)}</span>}><Liquidacion l={yo.resumen} /></Tarjeta>
     <Tarjeta titulo="Mis desprendibles"><Estado carga={carga} lineas={3}>{(l) => l.length === 0 ? <Vacio icono={FileText} titulo="Aún no hay desprendibles">Aparecen aquí cuando la empresa cierra cada periodo de nómina.</Vacio> :
-      <ul className="lista tocable">{l.map((n) => <li key={n.id}><button onClick={() => setSel(n)}><FileText size={22} aria-hidden="true" /><span className="crece"><strong>{fechaCorta(n.desde)} – {fechaCorta(n.hasta)}</strong></span><span className="num"><strong>{pesos(n.neto)}</strong></span></button></li>)}</ul>}</Estado></Tarjeta>
+      <ul className="lista tocable">{l.map((n) => <li key={n.id}><button onClick={() => setSel(n)}><FileText size={22} aria-hidden="true" /><span className="crece"><strong>{fechaCorta(n.desde)} – {fechaCorta(n.hasta)}</strong>{!n.acuse && tiene(yo, 'nomina') && <span className="suave chico" style={{ display: 'block' }}>Sin confirmar recibido</span>}</span><span className="num"><strong>{pesos(n.neto)}</strong></span></button></li>)}</ul>}</Estado></Tarjeta>
   </div>;
 }
 
@@ -286,6 +369,7 @@ function Perfil({ yo, recargar, alSalir }) {
       <Campo etiqueta="Correo" type="email" autoComplete="email" {...campo('email')} /><Campo etiqueta="Celular" type="tel" inputMode="numeric" autoComplete="tel" {...campo('telefono')} />
       <Campo etiqueta="Salario mensual" inputMode="numeric" disabled={u.salarioOk} ayuda={u.salarioOk ? 'Validado por el administrador. Para cambiarlo, habla con él.' : 'Pendiente de validación por el administrador.'} {...campo('salario')} />
       <Boton cargando={g} onClick={guardar}>Guardar datos</Boton></div></Tarjeta>
+    <Tarjeta titulo="Accesibilidad"><PanelAccesibilidad /></Tarjeta>
     <Tarjeta titulo="Recordatorios e instalación"><div className="pila">
       <p className="suave chico">Te avisa {yo.cfg.recordatorioMin} minutos antes de iniciar la jornada y {yo.cfg.recordatorioMin} minutos después de la hora de salida; lo mismo con el almuerzo. Con la aplicación cerrada, el aviso llega por correo si la empresa lo tiene activo.</p>
       {notif ? <Aviso tono="ok">Los recordatorios están activos en este celular.</Aviso> : <Boton variante="secundario" icono={Bell} onClick={async () => { const r = await pedirNotificaciones(); setNotif(r === 'granted'); if (r === 'granted') { programarRecordatorios(yo.hoy, yo.cfg.recordatorioMin); avisos.ok('Recordatorios activados.'); } else avisos.error(r === 'denied' ? 'Las notificaciones están bloqueadas en los ajustes del navegador.' : 'Este navegador no permite notificaciones.'); }}>Activar recordatorios</Boton>}
@@ -295,13 +379,14 @@ function Perfil({ yo, recargar, alSalir }) {
     <Tarjeta titulo="Cambiar contraseña"><div className="pila"><Campo etiqueta="Contraseña actual" type="password" autoComplete="current-password" {...cCampo('actual')} /><Campo etiqueta="Contraseña nueva" type="password" autoComplete="new-password" ayuda="Mínimo 6 caracteres." {...cCampo('nueva')} /><Boton variante="secundario" icono={KeyRound} cargando={gc} disabled={!cl.actual || cl.nueva.length < 6} onClick={clave}>Cambiar contraseña</Boton></div></Tarjeta>
     <Boton variante="secundario" icono={LogOut} onClick={() => setSalir(true)}>Cerrar sesión</Boton>
     <PieLegal />
-    <Confirmar abierta={salir} titulo="Cerrar sesión" texto="Cerrar sesión" alCerrar={() => setSalir(false)} alConfirmar={alSalir}>Tendrás que ingresar de nuevo con tu cédula y contraseña.{bandeja.lista().length > 0 && <strong> Tienes marcaciones sin enviar que se perderán.</strong>}</Confirmar>
+    <Confirmar abierta={salir} titulo="Cerrar sesión" texto="Cerrar sesión" alCerrar={() => setSalir(false)} alConfirmar={alSalir}>Tendrás que ingresar de nuevo con tu cédula y contraseña.{bandeja.mias(u.cedula).length > 0 && <strong> Tienes marcaciones sin enviar: quedan guardadas en este celular y se enviarán cuando vuelvas a ingresar con tu cuenta (nunca a nombre de otra persona). Mejor espera a tener señal antes de salir.</strong>}</Confirmar>
   </div>;
 }
 
 export default function Trabajador({ yo, actualizar, recargar, alSalir }) {
-  const [tab, setTab] = useState('inicio');
-  const tabs = [['inicio', 'Jornada', Clock], ['permisos', 'Permisos', CalendarDays], ['pagos', 'Pagos', Wallet], ['perfil', 'Perfil', UserRound]];
+  const [tab, setTab] = useState('inicio'), com = useCarga(() => (tiene(yo, 'autoservicio') ? api('comunicadosMios') : Promise.resolve([])), []);
+  const sinLeer = (com.datos || []).filter((c) => !c.leidoEl).length;
+  const tabs = [['inicio', 'Jornada', Clock], ['permisos', 'Permisos', CalendarDays], ['pagos', 'Pagos', Wallet], ['mas', 'Más', LayoutGrid, sinLeer], ['perfil', 'Perfil', UserRound]];
   return <>
     <main className="contenido" id="contenido" tabIndex={-1}>
       <h1 className="oculto-visual">{tabs.find((t) => t[0] === tab)[1]}</h1>
@@ -309,7 +394,8 @@ export default function Trabajador({ yo, actualizar, recargar, alSalir }) {
       {tab === 'permisos' && <Permisos yo={yo} />}
       {tab === 'pagos' && <Pagos yo={yo} />}
       {tab === 'perfil' && <Perfil yo={yo} recargar={recargar} alSalir={alSalir} />}
+      {tab === 'mas' && <Mas yo={yo} pendientesComunicados={sinLeer} alCambiar={() => com.recargar(true)} alSalir={alSalir} />}
     </main>
-    <nav className="nav-inferior no-imprimir" aria-label="Secciones"><ul>{tabs.map(([k, t, I]) => <li key={k}><button aria-current={tab === k ? 'page' : undefined} onClick={() => { setTab(k); window.scrollTo(0, 0); }}><I size={22} aria-hidden="true" />{t}</button></li>)}</ul></nav>
+    <nav className="nav-inferior no-imprimir" aria-label="Secciones"><ul>{tabs.map(([k, t, I, n]) => <li key={k}><button aria-current={tab === k ? 'page' : undefined} onClick={() => { setTab(k); window.scrollTo(0, 0); }}><I size={22} aria-hidden="true" />{t}{n > 0 && <span className="punto" aria-label={`${n} sin leer`}>{n}</span>}</button></li>)}</ul></nav>
   </>;
 }

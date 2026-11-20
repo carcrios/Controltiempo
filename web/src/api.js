@@ -1,5 +1,5 @@
 // Cliente de la API (Apps Script). Conexión por empresa, sesión persistente, bandeja de salida sin señal y reporte de errores.
-export const VERSION = '1.4.0';
+export const VERSION = '1.7.0';
 const CFG = window.CONFIG || {};
 const FIJA = CFG.API_URL || '';                                   // una sola empresa: dirección escrita en config.js
 const BASE = CFG.BASE_API || 'https://script.google.com/macros/s/'; // varias empresas: cada una entra con su enlace
@@ -7,7 +7,7 @@ const K = { token: 'cj.token', yo: 'cj.yo', salida: 'cj.salida', publico: 'cj.pu
 
 export const guardado = {
   leer(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } },
-  poner(k, v) { try { if (v === null || v === undefined) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch { /* almacenamiento lleno o bloqueado */ } }
+  poner(k, v) { try { if (v === null || v === undefined) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; /* almacenamiento lleno o bloqueado */ } }
 };
 export const sesion = {
   get token() { return guardado.leer(K.token, null); },
@@ -17,7 +17,7 @@ export const sesion = {
   get publico() { return guardado.leer(K.publico, null); },
   set publico(v) { guardado.poner(K.publico, v); },
   // Al caducar la sesión NO se borran las marcaciones pendientes: se envían tras ingresar de nuevo.
-  cerrar(todo) { [K.token, K.yo].concat(todo ? [K.salida, K.rech] : []).forEach((k) => guardado.poner(k, null)); }
+  cerrar(todo) { [K.token, K.yo].concat(todo ? [K.salida, K.rech] : []).forEach((k) => guardado.poner(k, null)); if (todo) { try { bandeja.lista().forEach((m) => bandeja.quitar(m.id)); } catch { /* sin bandeja */ } } }
 };
 
 /* ---------- Conexión con la empresa ---------- */
@@ -81,63 +81,98 @@ export const reloj = {
   ahora() { return new Date(Date.now() + (guardado.leer(K.desfase, 0) || 0)); }
 };
 
-/* ---------- Bandeja de salida: marcaciones hechas sin señal (IndexedDB con respaldo en memoria) ---------- */
+/* ---------- Bandeja de salida: marcaciones hechas sin señal ----------
+   Copia doble: IndexedDB con la foto y localStorage sin la foto. Si una falla, la otra conserva la marcación,
+   y la lista está disponible de inmediato al abrir la aplicación (no espera a IndexedDB). */
 let enviando = null;
-let colaMem = guardado.leer(K.salida, []);
+const sinFoto = (l) => l.map(({ foto, ...r }) => (foto ? { ...r, conFoto: true } : r)); // la copia liviana recuerda que hay foto en IndexedDB
+let colaMem = guardado.leer(K.salida, []) || [];
+const espejo = () => guardado.poner(K.salida, sinFoto(colaMem));
 const idb = (() => {
   if (typeof indexedDB === 'undefined') return null;
   let dbp = null;
   const abrir = () => dbp || (dbp = new Promise((ok, mal) => {
-    const r = indexedDB.open('cj_offline', 1);
-    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('salida')) r.result.createObjectStore('salida', { keyPath: 'id' }); };
-    r.onsuccess = () => ok(r.result);
-    r.onerror = () => mal(r.error);
+    const r = indexedDB.open('cj_offline', 2);
+    r.onupgradeneeded = () => { ['salida', 'rech'].forEach((n) => { if (!r.result.objectStoreNames.contains(n)) r.result.createObjectStore(n, { keyPath: 'id' }); }); };
+    r.onsuccess = () => { r.result.onversionchange = () => r.result.close(); ok(r.result); };
+    r.onerror = () => mal(r.error); r.onblocked = () => mal(new Error('IndexedDB bloqueado'));
+    setTimeout(() => mal(new Error('IndexedDB no responde')), 4000);
+  }).catch((e) => { dbp = null; throw e; }));
+  const tx = (store, modo, fn) => abrir().then((db) => new Promise((ok, mal) => {
+    const t = db.transaction(store, modo), s = t.objectStore(store), req = fn(s);
+    t.oncomplete = () => ok(req && req.result !== undefined ? req.result : true);
+    t.onerror = () => mal(t.error); t.onabort = () => mal(t.error);
   }));
-  const tx = (modo, fn) => abrir().then((db) => new Promise((ok, mal) => {
-    const t = db.transaction('salida', modo), s = t.objectStore('salida'), req = fn(s);
-    t.oncomplete = () => ok(req && req.result);
-    t.onerror = () => mal(t.error);
-  })).catch(() => null);
   return {
-    todo: () => tx('readonly', (s) => s.getAll()),
-    poner: (m) => tx('readwrite', (s) => s.put(m)),
-    borrar: (id) => tx('readwrite', (s) => s.delete(id)),
-    limpiar: () => tx('readwrite', (s) => s.clear())
+    todo: (st = 'salida') => tx(st, 'readonly', (s) => s.getAll()),
+    leer: (id, st = 'salida') => tx(st, 'readonly', (s) => s.get(id)),
+    poner: (m, st = 'salida') => tx(st, 'readwrite', (s) => s.put(m)),
+    borrar: (id, st = 'salida') => tx(st, 'readwrite', (s) => s.delete(id))
   };
 })();
-if (idb) {
-  idb.todo().then((rows) => {
-    if (Array.isArray(rows) && rows.length) {
-      const ids = new Set(rows.map((x) => x.id));
-      const extras = colaMem.filter((x) => !ids.has(x.id));
-      extras.forEach((x) => idb.poner(x));
-      colaMem = rows.concat(extras);
-    } else if (colaMem.length) {
-      colaMem.forEach((x) => idb.poner(x));
-    }
-    guardado.poner(K.salida, null); // libera cuota de localStorage tras migrar a IndexedDB
-  });
-}
+// Une lo de IndexedDB (con fotos) con la copia de localStorage
+const borradas = () => new Set(guardado.leer('cj.borradas', []) || []);
+(() => { // versiones anteriores no guardaban la cédula: eran de quien tenía la sesión abierta en este equipo
+  const ced = guardado.leer(K.yo, null)?.usuario?.cedula; if (!ced) return;
+  if (colaMem.some((m) => !m.cedula)) { colaMem = colaMem.map((m) => (m.cedula ? m : { ...m, cedula: ced })); guardado.poner(K.salida, colaMem); }
+  const rr = guardado.leer(K.rech, []) || []; if (rr.some((m) => !m.cedula)) guardado.poner(K.rech, rr.map((m) => (m.cedula ? m : { ...m, cedula: ced })));
+})();
+const cargada = idb ? Promise.race([idb.todo(), new Promise((ok) => setTimeout(() => ok(null), 3000))]).then((rows) => {
+  const b = borradas(); rows = (rows || []).filter((x) => !b.has(x.id)); // lo que ya se envió no reaparece aunque IndexedDB no lo haya borrado
+  const porId = new Map((rows || []).map((x) => [x.id, x]));
+  const ced0 = guardado.leer(K.yo, null)?.usuario?.cedula;
+  colaMem = colaMem.map((x) => { const r = porId.get(x.id); return r ? { ...r, cedula: r.cedula || x.cedula } : x; }).concat((rows || []).filter((x) => !colaMem.some((y) => y.id === x.id)).map((x) => (x.cedula || !ced0 ? x : { ...x, cedula: ced0 })));
+  espejo();
+}).catch(() => null) : Promise.resolve();
+const dueno = () => sesion.yo?.usuario?.cedula || '';
 export const bandeja = {
+  cargada,
   lista: () => colaMem.slice(),
-  rechazadas: () => guardado.leer(K.rech, []),
-  agregar(m) { colaMem = colaMem.filter((x) => x.id !== m.id).concat(m); if (idb) idb.poner(m); else guardado.poner(K.salida, colaMem); },
-  quitar(id) { colaMem = colaMem.filter((m) => m.id !== id); if (idb) idb.borrar(id); else guardado.poner(K.salida, colaMem); },
-  descartarRechazada(id) { guardado.poner(K.rech, bandeja.rechazadas().filter((m) => m.id !== id)); },
+  // Solo las de la persona que tiene la sesión. Las que no tienen dueño (versiones anteriores) no se atribuyen a nadie solas.
+  mias: (ced = dueno()) => colaMem.filter((m) => ced && m.cedula === ced),
+  ajenas: (ced = dueno()) => colaMem.filter((m) => !ced || m.cedula !== ced),
+  rechazadas: (ced = dueno()) => (guardado.leer(K.rech, []) || []).filter((m) => ced && m.cedula === ced),
+  // Devuelve true si quedó guardada en al menos un almacenamiento permanente
+  async agregar(m) {
+    colaMem = colaMem.filter((x) => x.id !== m.id).concat(m);
+    let db = false;
+    if (idb) { try { await idb.poner(m); db = true; } catch { db = false; } }
+    if (!db && m.foto) { const { foto, ...sin } = m; colaMem = colaMem.map((x) => (x.id === m.id ? sin : x)); } // sin IndexedDB la copia no promete una foto que no existe
+    return espejo() || db;
+  },
+  quitar(id) {
+    colaMem = colaMem.filter((m) => m.id !== id); espejo();
+    if (idb) { const b = [...borradas(), id].slice(-200); guardado.poner('cj.borradas', b); idb.borrar(id).catch(() => {}); }
+  },
+  descartarRechazada(id) { guardado.poner(K.rech, (guardado.leer(K.rech, []) || []).filter((m) => m.id !== id)); if (idb) idb.borrar(id, 'rech').catch(() => {}); },
+  // Vuelve a intentar una rechazada con su foto original (por ejemplo, agregando el código QR)
+  async reintentar(id, extra = {}) {
+    const r = bandeja.rechazadas().find((m) => m.id === id); if (!r) return null; // solo las propias
+    let foto = null; if (idb) { try { foto = (await idb.leer(id, 'rech'))?.foto || null; } catch { /* sin foto */ } }
+    const { rechazo, codRechazo, ...m } = r;
+    return { ...m, ...(foto ? { foto } : {}), ...extra };
+  },
   enviar() {
     if (enviando) return enviando; // un solo envío a la vez
     enviando = (async () => {
+      await cargada;
       let enviadas = 0; const rechazadas = [];
-      for (const m of bandeja.lista()) {
-        try { await api('marcar', { ...m, offline: !m.manual }); enviadas++; bandeja.quitar(m.id); }
+      // En orden y deteniéndose en el primer fallo de red: si la entrada no sale, la salida no se manda (evita rechazos por orden)
+      const yoCed = dueno(); // solo se envían las del usuario que tiene la sesión: nunca quedan a nombre de otro
+      for (const m0 of bandeja.mias(yoCed).sort((a, b) => (a.hora < b.hora ? -1 : 1))) {
+        let m = m0;
+        if (!m.foto && m.conFoto && idb) { // la foto vive en IndexedDB: si no se puede leer ahora, se espera en vez de enviarla sin foto
+          try { const x = await Promise.race([idb.leer(m.id), new Promise((_, no) => setTimeout(() => no(new Error('lento')), 3000))]); if (x?.foto) m = { ...m, foto: x.foto }; /* no existe: se envía sin foto y, si el servidor la exige, pasa a rechazadas con su salida */ } catch { break; }
+        }
+        try { const { conFoto, ...envio } = m; await api('marcar', { ...envio, offline: !m.manual }); enviadas++; bandeja.quitar(m.id); }
         catch (e) {
-          if (e.cod === 'SESION' || e.cod === 'CONFIG') break;      // se conservan para después del ingreso
-          if (reintentable(e)) continue;
-          bandeja.quitar(m.id); const { foto, ...resto } = m; rechazadas.push({ ...resto, rechazo: e.message }); // queda visible hasta que el trabajador la atienda
+          if (e.cod === 'SESION' || e.cod === 'CONFIG' || e.cod === 'AJENA' || reintentable(e)) break; // se conservan para después
+          bandeja.quitar(m.id); const { foto, ...resto } = m; rechazadas.push({ ...resto, rechazo: e.message, codRechazo: e.cod });
+          if (idb && foto) idb.poner({ id: m.id, foto }, 'rech').catch(() => {}); // la foto se guarda para poder reintentar
         }
       }
-      if (rechazadas.length) guardado.poner(K.rech, bandeja.rechazadas().concat(rechazadas).slice(-10));
-      return { enviadas, pendientes: bandeja.lista().length, rechazadas };
+      if (rechazadas.length) guardado.poner(K.rech, (guardado.leer(K.rech, []) || []).concat(rechazadas).slice(-50)); // de todas las personas del equipo; sin foto pesan poco
+      return { enviadas, pendientes: bandeja.mias(yoCed).length, ajenas: bandeja.ajenas(yoCed).length, rechazadas };
     })().finally(() => { enviando = null; });
     return enviando;
   }

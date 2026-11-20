@@ -1,4 +1,4 @@
-/* Control de jornada 1.6.1 — archivo único para pegar en Apps Script (Extensiones → Apps Script).
+/* Control de jornada 1.7.0 — archivo único para pegar en Apps Script (Extensiones → Apps Script).
    Generado por herramientas/empaquetar.js: no lo edites a mano. */
 
 // ===================== Motor.gs =====================
@@ -222,6 +222,8 @@ var Motor = (function () {
       else if (per && !per.horas) { if (!trabajo && !es31) { if (per.remunerado) diasLic++; else diasPermNoRem++; } }
       else if (!trabajo && prog) { faltaSem[lunesDe(f)] = 1; if (!porDia && !es31) { aus++; ausentes.push(f); } }
       else if (!trabajo && esDescanso(f, cfg)) descansos++;
+      // Jornalero que trabaja su domingo o festivo: conserva el descanso remunerado y además cobra el día con recargo (CST arts. 173, 179 y 180)
+      if (porDia && trabajo && !inc && esDescanso(f, cfg)) descansos++;
       f = sumar(f, 1);
     }
     perms.forEach(function (x) { if (x.horas && !x.remunerado && x.desde >= desde && x.desde <= corte) horasPermNoRem += +x.horas; });
@@ -276,7 +278,7 @@ var Motor = (function () {
   }
 
   /* ---------- Vacaciones (CST art. 186: 15 días hábiles por año) ---------- */
-  function vacacionesCausadas(ingreso, hoy) { if (!ingreso) return 0; return Math.max(0, Math.round(diasEntre(ingreso, hoy) * 15 / 365 * 10) / 10); }
+  function vacacionesCausadas(ingreso, hoy) { if (!ingreso || hoy < ingreso) return 0; return Math.max(0, Math.round(diasNomina(ingreso, hoy) * 15 / 360 * 10) / 10); } // 15 días hábiles por cada 360 (CST art. 186)
   function diasHabiles(desde, hasta, cfg, sabadoHabil) {
     var n = 0, f = desde; while (f <= hasta) { var w = dow(f); if (w !== 0 && !esFestivo(f, cfg) && (w !== 6 || sabadoHabil)) n++; f = sumar(f, 1); } return n;
   }
@@ -317,7 +319,7 @@ var Motor = (function () {
  * Base: acceso a datos, seguridad, configuración y enrutador de la API.
  * Una hoja de cálculo = una empresa. Nada de la empresa está escrito en el código: todo vive en la hoja Config.
  */
-var VERSION = '1.6.1';
+var VERSION = '1.7.0';
 // Página publicada (GitHub Pages) que usan tus clientes. Déjala escrita en la plantilla para que el instalador entregue el enlace listo.
 var APP_PREDETERMINADA = '';
 // Clave secreta del proveedor para firmar llaves de licencia por plan/módulos. Si está vacía, todos los módulos quedan activos (modo demostración).
@@ -331,12 +333,12 @@ var _AHORA = null; // solo para pruebas
 
 var HOJAS = {
   Config: ['clave', 'valor'],
-  Usuarios: ['cedula', 'nombre', 'cargo', 'rol', 'centroId', 'salario', 'salarioOk', 'tipoPago', 'email', 'telefono', 'ingreso', 'eps', 'arl', 'estado', 'hash', 'salt', 'codigo', 'consVersion', 'consFecha', 'creado', 'supCentros', 'banco', 'tipoCuenta', 'cuenta', 'retiro', 'dispositivoId', 'fotoRef', 'tipoContrato', 'finContrato'],
+  Usuarios: ['cedula', 'nombre', 'cargo', 'rol', 'centroId', 'salario', 'salarioOk', 'tipoPago', 'email', 'telefono', 'ingreso', 'eps', 'arl', 'estado', 'hash', 'salt', 'codigo', 'consVersion', 'consFecha', 'creado', 'supCentros', 'banco', 'tipoCuenta', 'cuenta', 'retiro', 'dispositivoId', 'fotoRef', 'tipoContrato', 'finContrato', 'liquidado'],
   Sesiones: ['hash', 'cedula', 'creado', 'expira', 'equipo'],
-  Centros: ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo', 'poligono', 'exigirQr', 'presupuestoHoras', 'presupuestoCosto'],
+  Centros: ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo', 'poligono', 'exigirQr', 'presupuestoHoras', 'presupuestoCosto', 'arlPct'],
   Jefes: ['id', 'nombre', 'cargo', 'email', 'whatsapp', 'pin', 'centros', 'activo'],
   Marcaciones: ['id', 'cedula', 'fecha', 'tipo', 'hora', 'servidor', 'lat', 'lng', 'prec', 'dist', 'enZona', 'centroId', 'foto', 'fotoExigida', 'manual', 'motivo', 'estado', 'horario', 'origen', 'editadoPor'],
-  Permisos: ['id', 'cedula', 'tipo', 'cat', 'remunerado', 'fechaSalida', 'horaSalida', 'fechaRegreso', 'horaRegreso', 'motivo', 'soporte', 'estado', 'creado', 'limite', 'firmas', 'decididoPor', 'decididoEl', 'obs'],
+  Permisos: ['id', 'cedula', 'tipo', 'cat', 'remunerado', 'fechaSalida', 'horaSalida', 'fechaRegreso', 'horaRegreso', 'motivo', 'soporte', 'estado', 'creado', 'limite', 'firmas', 'decididoPor', 'decididoEl', 'obs', 'salidaReal', 'regresoReal', 'gpsSalida', 'gpsRegreso'],
   Incapacidades: ['id', 'cedula', 'tipo', 'desde', 'hasta', 'entidad', 'nota', 'soporte', 'registradoPor', 'creado'],
   Extras: ['id', 'cedula', 'fecha', 'minCalc', 'minAprob', 'estado', 'decididoPor', 'decididoEl', 'obs'],
   Nomina: ['id', 'desde', 'hasta', 'cedula', 'nombre', 'neto', 'detalle', 'generado', 'acuse'],
@@ -347,15 +349,17 @@ var HOJAS = {
   Alertas: ['fecha', 'tipo', 'cedula', 'detalle', 'enviadoA', 'estado'],
   Auditoria: ['fecha', 'actor', 'accion', 'detalle', 'hash'],
   Errores: ['fecha', 'cedula', 'origen', 'mensaje', 'detalle', 'equipo', 'version'],
-  Prestamos: ['id', 'cedula', 'concepto', 'monto', 'cuotas', 'cuotaValor', 'pagadas', 'saldo', 'estado', 'creadoPor', 'creado'],
-  Compensatorios: ['id', 'cedula', 'fecha', 'minutos', 'tipo', 'motivo', 'creadoPor', 'creado'],
-  Comunicados: ['id', 'titulo', 'cuerpo', 'centros', 'creadoPor', 'creado', 'leidos']
+  Prestamos: ['id', 'cedula', 'concepto', 'monto', 'cuotas', 'cuotaValor', 'pagadas', 'saldo', 'estado', 'creadoPor', 'creado', 'autorizacion', 'ultimoPeriodo'],
+  Compensatorios: ['id', 'cedula', 'fecha', 'minutos', 'tipo', 'motivo', 'creadoPor', 'creado', 'soporte'],
+  Comunicados: ['id', 'titulo', 'cuerpo', 'centros', 'creadoPor', 'creado', 'leidos'],
+  Certificados: ['codigo', 'cedula', 'fecha', 'nombre', 'cargo', 'ingreso', 'retiro', 'tipoContrato', 'salario', 'estado', 'emitidoPor', 'creado', 'tipoPago'],
+  Liquidaciones: ['id', 'cedula', 'nombre', 'retiro', 'causa', 'total', 'detalle', 'registradoPor', 'creado']
 };
 
 var TIPOS_ALERTA = {
   tardanza: 'Llegada tarde', ausencia: 'No se presentó', fuera_zona: 'Marcación fuera del centro de trabajo',
   marcacion_manual: 'Marcación con hora digitada', bloqueo_permisos: 'Bloqueó la ubicación o la cámara', sin_foto: 'Marcación sin la foto exigida',
-  incompleto: 'Jornada sin salida', permiso_nuevo: 'Nueva solicitud de permiso', permiso_vencido: 'Permiso sin respuesta a tiempo',
+  incompleto: 'Jornada sin salida', permiso_nuevo: 'Nueva solicitud de permiso', permiso_vencido: 'Permiso sin respuesta a tiempo', permiso_uso: 'Salida o regreso de permiso fuera de la hora aprobada',
   permiso_resuelto: 'Permiso aprobado o rechazado', extras_tope: 'Horas extra por encima del tope legal', extras_pendientes: 'Horas extra por aprobar',
   fatiga: 'Jornada continua cerca del máximo (fatiga)', seguridad: 'Intentos de acceso sospechosos', registro_nuevo: 'Nuevo usuario por aprobar', respaldo: 'Resultado de la copia de seguridad', error_sistema: 'Error del sistema', contrato_vencimiento: 'Contrato próximo a vencer', gps_sospechoso: 'Ubicación sospechosa (posible GPS falso)', presupuesto_obra: 'Alerta de presupuesto de obra'
 };
@@ -369,7 +373,8 @@ var CFG_DEF = {
   autoRegistro: true, codigoEmpresa: '', sesionDias: 90, sesionAdminHoras: 24, admin2FA: false,
   correoAlertas: '', alertas: {},
   retencionFotosDias: 30, retencionGpsDias: 365, retencionSoportesDias: 365, archivarMeses: 12, respaldoCadaDias: 7, respaldoConservar: 8,
-  vincularDispositivo: false, alertasAgrupadas: false, telegramToken: '', telegramChatId: '',
+  vincularDispositivo: false, alertasAgrupadas: false, telegramToken: '', telegramChatId: '', telegramSinNombres: true,
+  arlPct: 0.522, exoneradoAportes: false, compensarExtras: false,
   contactosEmergencia: [],
   versionLegal: '2026-11',
   legal: {} // parámetros del motor que la empresa quiera sobrescribir
@@ -400,7 +405,8 @@ function igualSeguro_(a, b) {
   return d === 0;
 }
 function hashClave_(clave, salt) { var h = salt + '|' + clave; for (var i = 0; i < 150; i++) h = sha_(h + salt); return h; }
-function hashClaveV2_(clave, salt) { var h = hmac_(salt + '|' + clave); for (var i = 0; i < 2000; i++) h = hmac_(h + '|' + salt); return 'v2:' + h; }
+var ITER_CLAVE = 600; // medir en la cuenta real: subir si el ingreso tarda menos de 1 s
+function hashClaveV2_(clave, salt) { var h = hmac_(salt + '|' + clave); for (var i = 0; i < ITER_CLAVE; i++) h = hmac_(h + '|' + salt); return 'v2:' + h; }
 function verificarClave_(clave, salt, hash) { if (!hash) return false; return String(hash).indexOf('v2:') === 0 ? igualSeguro_(hashClaveV2_(clave, salt), hash) : igualSeguro_(hashClave_(clave, salt), hash); }
 function azar_() { return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, ''); }
 function codigo6_() { return String(parseInt(azar_().substr(0, 8), 16) % 900000 + 100000); }
@@ -423,12 +429,16 @@ function enPoligono_(lat, lng, poly) {
 }
 function codigoQrCentro_(centroId, ventana) { return hmac_('qr|' + centroId + '|' + ventana).substr(0, 6).toUpperCase(); }
 function codigoDiaCentro_(centroId, fecha) { return hmac_('qrdia|' + centroId + '|' + fecha).substr(0, 6).toUpperCase(); }
-function validarQrCentro_(centroId, entrada) {
+// Devuelve 'qr' (código rotativo vigente), 'dia' (código del día indicado) o false.
+// El código del día solo se acepta dentro de la geocerca o, sin conexión, quedando para revisión (ver a_marcar).
+function validarQrCentro_(centroId, entrada, fechaDia, msMarca) {
   var raw = txt_(entrada, 80).toUpperCase(); if (!raw) return false;
   var a = ahora_(), seg = Math.max(30, +cfg_().qrVentanaSeg || 60), w = Math.floor(a.ms / (seg * 1000));
-  if (raw === codigoDiaCentro_(centroId, a.fecha)) return true;
   var cod = raw.indexOf('CJ:') === 0 ? raw.split(':').pop() : raw;
-  return cod === codigoQrCentro_(centroId, w) || cod === codigoQrCentro_(centroId, w - 1);
+  if (cod === codigoQrCentro_(centroId, w) || cod === codigoQrCentro_(centroId, w - 1)) return 'qr';
+  if (msMarca) { var wm = Math.floor(msMarca / (seg * 1000)); for (var k = -2; k <= 1; k++) if (cod === codigoQrCentro_(centroId, wm + k)) return 'qr'; } // escaneado sin señal: vale el QR de la hora de la marca
+  if (raw === codigoDiaCentro_(centroId, fechaDia || a.fecha)) return 'dia';
+  return false;
 }
 // Contador de FALLOS (no de intentos): bloquea adivinar claves aunque el atacante cambie de cédula o de permiso.
 function fallo_(clave, seg) { var c = CacheService.getScriptCache(), k = 'fl:' + clave, n = +(c.get(k) || 0) + 1; c.put(k, String(n), seg); return n; }
@@ -500,6 +510,10 @@ function auditar_(actor, accion, detalle) {
   var prev = leer('Auditoria', 1), ant = prev.length ? (prev[0].hash || '') : 'GENESIS';
   var h = hmac_(ant + '|' + fecha + '|' + actor + '|' + accion + '|' + det).substr(0, 32);
   agregar('Auditoria', { fecha: fecha, actor: actor, accion: accion, detalle: det, hash: h });
+  try { // ancla fuera de la hoja (la primera vez cuenta las filas firmadas que ya existían)
+    var nAud = prop_('AUD_N'); if (nAud === null || nAud === undefined) { nAud = leer('Auditoria').filter(function (r) { return !!r.hash; }).length; prop_('AUD_DESDE', fecha); } else nAud = +nAud + 1;
+    prop_('AUD_N', String(nAud)); prop_('AUD_ULT', h);
+  } catch (e) { }
 }
 function correo_(para, asunto, cuerpo) {
   para = String(para || '').split(/[,; ]+/).filter(function (x) { return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x); });
@@ -510,7 +524,11 @@ function correo_(para, asunto, cuerpo) {
     return para.join(',');
   } catch (e) { return 'FALLÓ: ' + e.message; }
 }
-function telegram_(texto) {
+// Los mensajes se encolan y salen al terminar la petición, fuera del bloqueo: un Telegram lento no demora a nadie.
+var _colaTelegram = [];
+function telegram_(texto) { var c = cfg_(); if ((prop_('TELEGRAM_TOKEN') || c.telegramToken) && c.telegramChatId) _colaTelegram.push(texto); }
+function enviarTelegram_() { var l = _colaTelegram; _colaTelegram = []; l.forEach(telegramYa_); }
+function telegramYa_(texto) {
   var c = cfg_(), tok = prop_('TELEGRAM_TOKEN') || c.telegramToken; if (!tok || !c.telegramChatId) return;
   try {
     UrlFetchApp.fetch('https://api.telegram.org/bot' + tok + '/sendMessage', {
@@ -524,7 +542,7 @@ function alertar_(tipo, cedula, detalle) {
   var c = cfg_(), a = (c.alertas || {})[tipo] || {}, activo = a.activo !== false, para = a.correos || c.correoAlertas, enviado = '';
   var diferida = activo && para && c.alertasAgrupadas && ALERTAS_AGRUPABLES[tipo];
   var u = cedula ? buscar('Usuarios', 'cedula', cedula) : null;
-  if (activo && !diferida) telegram_((TIPOS_ALERTA[tipo] || tipo) + (u ? ' — ' + u.nombre : '') + '\n' + detalle);
+  if (activo && !diferida) telegram_((TIPOS_ALERTA[tipo] || tipo) + (u && !c.telegramSinNombres ? ' — ' + u.nombre : '') + '\n' + detalle); // Telegram está fuera del país: por defecto sin nombres
   if (activo && para && !diferida) {
     enviado = correo_(para, TIPOS_ALERTA[tipo] + (u ? ': ' + u.nombre : ''), (u ? u.nombre + ' (C.C. ' + cedula + ')\n' : '') + detalle + '\n\nFecha: ' + ahora_().iso.replace('T', ' '));
   }
@@ -540,7 +558,8 @@ function registrarError_(origen, err, extra) {
 function crearSesion_(cedula, equipo, rol) {
   var t = azar_(), a = ahora_(), c = cfg_();
   var ttl = rol === 'admin' ? Math.max(1, +c.sesionAdminHoras || 24) * 3600000 : c.sesionDias * 86400000;
-  agregar('Sesiones', { hash: sha_(t), cedula: cedula, creado: a.iso, expira: String(a.ms + ttl), equipo: txt_(equipo, 120) });
+  equipo = txt_(equipo, 120); if (rol !== 'kiosco' && equipo.indexOf('KIOSCO|') === 0) equipo = equipo.substr(7);
+  agregar('Sesiones', { hash: sha_(t), cedula: cedula, creado: a.iso, expira: String(a.ms + ttl), equipo: equipo });
   return t;
 }
 function usuarioDeToken_(t) {
@@ -549,10 +568,15 @@ function usuarioDeToken_(t) {
   if (!ced) {
     var s = buscar('Sesiones', 'hash', h);
     if (!s || +s.expira < ahora_().ms) throw E_('SESION', 'Tu sesión terminó. Ingresa de nuevo.');
-    ced = s.cedula; cache.put('ses:' + h, ced, 1800);
+    ced = s.cedula + (String(s.equipo).indexOf('KIOSCO|') === 0 ? '|' + String(s.equipo).split('|')[1] : ''); cache.put('ses:' + h, ced, 1800);
   }
-  var u = buscar('Usuarios', 'cedula', ced);
+  var partes = String(ced).split('|'), u = buscar('Usuarios', 'cedula', partes[0]);
   if (!u || (u.estado !== 'activo' && u.estado !== 'pendiente')) throw E_('SESION', 'Tu usuario no está activo. Habla con el administrador.');
+  if (partes.length > 1) { // sesión de kiosco: solo sirve para marcar en ese centro
+    var kc = centroDe_(partes[1]), alK = alcance_(u);
+    if (u.estado !== 'activo' || ['admin', 'supervisor'].indexOf(u.rol) < 0 || !kc || !kc.activo || (alK && !alK[partes[1]])) throw E_('SESION', 'Este kiosco quedó sin autorización. Un supervisor debe activarlo de nuevo.');
+    var k = {}; for (var x in u) k[x] = u[x]; k._kiosco = partes[1]; return k;
+  }
   return u;
 }
 function cerrarSesiones_(cedula, soloHash) {
@@ -581,9 +605,14 @@ function licenciaEfectiva_() {
     var base = PLANES[datos.plan] || PLANES.basico;
     var mods = base.modulos.slice();
     (datos.modulosExtra || []).forEach(function (m) { if (mods.indexOf(m) < 0) mods.push(m); });
-    var vence = String(datos.vence || '').substr(0, 10);
-    var vencida = !!(vence && /^\d{4}-\d\d-\d\d$/.test(vence) && ahora_().fecha > vence);
-    return { plan: datos.plan || 'basico', modulos: vencida ? ['asistencia'] : mods, maxUsuarios: +datos.maxUsuarios || base.maxUsuarios, vence: vence, vencida: vencida };
+    var vence = String(datos.vence || '').substr(0, 10), hoy = ahora_().fecha;
+    // La llave es de una empresa (NIT) y siempre tiene vencimiento. Tras vencer hay 15 días de gracia para cerrar nómina y renovar.
+    var nitOk = !CLAVE_LICENCIA_PROVEEDOR || (datos.nit && soloDigitos_(datos.nit) === soloDigitos_(prop_('LIC_NIT') || cfg_().empresa.nit));
+    if (CLAVE_LICENCIA_PROVEEDOR && (!/^\d{4}-\d\d-\d\d$/.test(vence) || !nitOk))
+      return { plan: 'basico', modulos: PLANES.basico.modulos.slice(), maxUsuarios: PLANES.basico.maxUsuarios, vence: vence, vencida: true, motivo: !nitOk ? 'La llave es de otra empresa (NIT distinto).' : 'La llave no tiene fecha de vencimiento.' };
+    var gracia = vence ? Motor.sumar(vence, 15) : '';
+    return { plan: datos.plan || 'basico', modulos: mods, maxUsuarios: Math.min(+datos.maxUsuarios || base.maxUsuarios, 2000), vence: vence, nit: datos.nit || '',
+      enGracia: !!(vence && hoy > vence && hoy <= gracia), vencida: !!(vence && hoy > gracia) };
   } catch (e) { return def; }
 }
 function moduloActivo_(mod) { return !mod || licenciaEfectiva_().modulos.indexOf(mod) >= 0; }
@@ -592,16 +621,13 @@ function moduloActivo_(mod) { return !mod || licenciaEfectiva_().modulos.indexOf
 var ACCIONES = {}; // nombre -> {fn, rol: 'publico' | 'usuario' | 'admin', escribe, modulo}
 function accion_(nombre, rol, escribe, fn, modulo) { ACCIONES[nombre] = { fn: fn, rol: rol, escribe: escribe, modulo: modulo || '' }; }
 
-var ACCIONES_SIEMPRE = { publico: 1, consultarCedula: 1, login: 1, salir: 1, yo: 1, adminLicenciaActivar: 1 };
+var ACCIONES_SIEMPRE = { publico: 1, consultarCedula: 1, login: 1, salir: 1, yo: 1, adminLicenciaActivar: 1, kioscoMarcar: 1, kioscoIniciar: 1, kioscoSalir: 1 };
+var ACCIONES_KIOSCO = { kioscoMarcar: 1, kioscoSalir: 1, yo: 1 }; // salir del kiosco exige la clave de un supervisor (kioscoSalir)
 function despachar_(req) {
   _c = {}; _cfg = null;
   if (!ACCIONES.publico) registrarAcciones_();
   var a = ACCIONES[req && req.a];
   if (!a) throw E_('ACCION', 'Acción desconocida.');
-  if (CLAVE_LICENCIA_PROVEEDOR && !ACCIONES_SIEMPRE[req.a]) {
-    var lic = licenciaEfectiva_();
-    if (lic.vencida) throw E_('LICENCIA_VENCIDA', 'La suscripción de esta empresa está vencida. Renueva tu plan e ingresa la nueva llave de licencia para continuar.');
-  }
   if (a.modulo && !moduloActivo_(a.modulo)) throw E_('MODULO_NO_INCLUIDO', 'El módulo "' + a.modulo + '" no está incluido en tu plan actual.');
   var lock = null;
   if (a.escribe) { lock = LockService.getScriptLock(); if (!lock.tryLock(25000)) throw E_('OCUPADO', 'El sistema está ocupado. Intenta de nuevo en unos segundos.'); }
@@ -609,11 +635,16 @@ function despachar_(req) {
     var u = null;
     if (a.rol !== 'publico') {
       u = usuarioDeToken_(req.t);
+      if (u._kiosco && !ACCIONES_KIOSCO[req.a]) throw E_('PERMISO', 'Esta tablet está en modo kiosco: solo sirve para marcar.');
+      if (!u._kiosco && req.a === 'kioscoMarcar') throw E_('PERMISO', 'Primero activa el modo kiosco en esta tablet.');
       if (a.rol === 'supervisor' && (['admin', 'supervisor'].indexOf(u.rol) < 0 || u.estado !== 'activo')) throw E_('PERMISO', 'Esta acción es solo para supervisores y administradores.');
       if (a.rol === 'admin' && (u.rol !== 'admin' || u.estado !== 'activo')) throw E_('PERMISO', 'Esta acción es solo para administradores.');
+      // Suscripción vencida: el panel queda en solo lectura. Nadie pierde acceso a sus datos y el personal sigue marcando.
+      if (CLAVE_LICENCIA_PROVEEDOR && a.escribe && (a.rol === 'admin' || a.rol === 'supervisor') && !ACCIONES_SIEMPRE[req.a] && licenciaEfectiva_().vencida)
+        throw E_('LICENCIA_VENCIDA', 'La suscripción está vencida: el panel quedó en modo consulta. Ingresa la nueva llave de licencia en Configuración → Licencia para volver a editar.');
     }
     return { ok: true, d: a.fn(req.d || {}, u, req) };
-  } finally { if (lock) lock.releaseLock(); }
+  } finally { if (lock) lock.releaseLock(); try { enviarTelegram_(); } catch (e) { } }
 }
 function doPost(e) {
   var out, req = null;
@@ -664,7 +695,7 @@ function centros_() {
   });
 }
 function centroDe_(id) { var l = centros_(); for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i]; return null; }
-function centroPub_(c) { var o = {}; ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo', 'poligono', 'exigirQr', 'presupuestoHoras', 'presupuestoCosto'].forEach(function (k) { o[k] = c[k]; }); return o; }
+function centroPub_(c) { var o = {}; ['id', 'nombre', 'cliente', 'direccion', 'lat', 'lng', 'radio', 'horario', 'tol', 'festivos', 'activo', 'poligono', 'exigirQr', 'presupuestoHoras', 'presupuestoCosto', 'arlPct'].forEach(function (k) { o[k] = c[k]; }); return o; }
 // Turno programado para una persona en una fecha: undefined = sin programación (rige el horario del centro), null = descanso.
 function turnoDe_(cedula, fecha) {
   var pr = leer('Programacion'), r = null;
@@ -675,6 +706,8 @@ function turnoDe_(cedula, fecha) {
   var dias = json_(t.dias, []); if (dias.length && dias.indexOf(Motor.dow(fecha)) < 0) return null;
   return { e: t.e, s: t.s, ai: t.ai || '', af: t.af || '' };
 }
+// Quien trabaja los sábados cuenta el sábado como día hábil de vacaciones (concepto MinTrabajo 6510 de 2026)
+function sabadoHabil_(cedula) { var u = buscar('Usuarios', 'cedula', cedula), c = u ? centroDe_(u.centroId) : null; return !!(c && c.horario && (c.horario[6] || c.horario['6'])); }
 function horarioDe_(centro, fecha, cedula) {
   if (cedula) { var t = turnoDe_(cedula, fecha); if (t !== undefined) { if (t) t.tol = centro ? centro.tol : cfg_().toleranciaMin; return t; } }
   if (!centro) return null;
@@ -717,7 +750,10 @@ function permisosAprobados_(cedula) {
     var mismo = p.fechaSalida === p.fechaRegreso, horas = null;
     if (mismo && p.horaSalida && p.horaRegreso) horas = Math.max(0, Math.round((Motor.aMin(p.horaRegreso) - Motor.aMin(p.horaSalida)) / 6) / 10);
     return { desde: p.fechaSalida, hasta: mismo ? p.fechaSalida : Motor.sumar(p.fechaRegreso, -1), remunerado: p.remunerado === '1', horas: horas, tipo: p.tipo };
-  });
+  }).concat(leer('Compensatorios').filter(function (x) { return x.cedula === cedula && +x.minutos < 0; }).map(function (x) {
+    var u0 = buscar('Usuarios', 'cedula', cedula), h0 = u0 ? horarioDe_(centroDe_(u0.centroId), x.fecha, cedula) : null, jor = h0 ? Motor.jornadaMin(h0) : 480, m = -x.minutos;
+    return { desde: x.fecha, hasta: x.fecha, remunerado: true, horas: m >= jor ? null : Math.round(m / 6) / 10, tipo: 'compensatorio' };
+  }));
 }
 function insumos_(u, desde, hasta, corte, marc) {
   var centro = centroDe_(u.centroId), ext = {};
@@ -741,7 +777,54 @@ function estadoHoy_(u, marc) {
   var sig = !marcas.entrada ? 'entrada' : marcas.salida ? null : (!marcas.sal_alm ? 'sal_alm' : !marcas.ent_alm ? 'ent_alm' : 'salida');
   var centro = centroDe_((hoy && hoy.centroId) || u.centroId), plan = {};
   TIPOS.forEach(function (t) { plan[t] = fotoRequerida_(u.cedula, fecha, t); });
-  return { fecha: fecha, marcas: marcas, siguiente: sig, fotoPlan: plan, horario: (hoy && hoy.horario) || horarioDe_(centro, fecha, u.cedula), centroId: centro ? centro.id : '', festivo: Motor.esFestivo(fecha, legal_()) };
+  return { fecha: fecha, marcas: marcas, siguiente: sig, fotoPlan: plan, horario: (hoy && hoy.horario) || horarioDe_(centro, fecha, u.cedula), centroId: centro ? centro.id : '', festivo: Motor.esFestivo(fecha, legal_()), permiso: permisoDeHoy_(u, a.fecha) };
+}
+// Permiso aprobado que la persona puede usar hoy: salir a él o, si es por horas, registrar el regreso
+function permisoDeHoy_(u, hoy) {
+  var p = leer('Permisos').filter(function (x) {
+    if (x.cedula !== u.cedula || x.estado !== 'aprobado') return false;
+    if (!x.salidaReal) return x.fechaSalida === hoy;
+    return !x.regresoReal && x.fechaRegreso === hoy && !!x.horaRegreso; // permiso por horas: regresa el mismo día
+  })[0];
+  if (!p) return null;
+  var cat = Motor.PERMISOS.filter(function (x) { return x.id === p.tipo; })[0] || {};
+  return { id: p.id, tipoNombre: cat.nombre || p.tipo, fechaSalida: p.fechaSalida, horaSalida: p.horaSalida || '', fechaRegreso: p.fechaRegreso, horaRegreso: p.horaRegreso || '',
+    regresaHoy: p.fechaRegreso === hoy && !!p.horaRegreso, fase: p.salidaReal ? 'regresar' : 'salir', salidaReal: p.salidaReal ? p.salidaReal.substr(11, 5) : '' };
+}
+var _marcaPermiso = false; // solo lo activa a_permisoSalir en el servidor
+// "Salir a mi permiso": deja constancia de la hora real de salida con ubicación y, si no vuelve hoy, cierra la jornada con la salida
+function a_permisoSalir(d, u) {
+  var a = ahora_(), p = buscar('Permisos', 'id', txt_(d.id, 40));
+  if (!p || p.cedula !== u.cedula) throw E_('DATOS', 'No se encontró el permiso.');
+  if (p.estado !== 'aprobado') throw E_('DATOS', 'Ese permiso todavía no está aprobado: no puedes salir con él.');
+  if (p.salidaReal) throw E_('DATOS', 'Ya registraste la salida a este permiso a las ' + p.salidaReal.substr(11, 5) + '.');
+  if (p.fechaSalida !== a.fecha) throw E_('DATOS', 'Este permiso es para el ' + p.fechaSalida + '. Solo puedes salir con él ese día.');
+  var gps = isFinite(+d.lat) && isFinite(+d.lng) ? (+d.lat).toFixed(6) + ',' + (+d.lng).toFixed(6) : '';
+  p.salidaReal = a.iso; p.gpsSalida = gps; guardar('Permisos', p);
+  var marc = leer('Marcaciones', 30000), h = estadoHoy_(u, marc), cerro = false;
+  var regresaHoy = p.fechaRegreso === a.fecha && !!p.horaRegreso;
+  if (h.marcas.entrada && !h.marcas.salida && !regresaHoy) { // no vuelve hoy: la jornada termina al salir al permiso
+    _marcaPermiso = true;
+    try { a_marcar({ tipo: 'salida', lat: d.lat, lng: d.lng, prec: d.prec, centroId: h.centroId, id: 'PERM-' + p.id, motivo: 'Salida a permiso' }, u); cerro = true; }
+    finally { _marcaPermiso = false; }
+  }
+  var cat = Motor.PERMISOS.filter(function (x) { return x.id === p.tipo; })[0] || {};
+  if (p.horaSalida && a.iso.substr(11, 5) < p.horaSalida) alertar_('permiso_uso', u.cedula, 'Salió a su permiso (' + (cat.nombre || p.tipo) + ') a las ' + a.iso.substr(11, 5) + ', antes de la hora aprobada (' + p.horaSalida + ').');
+  auditar_(u.cedula, 'permiso_salida', { id: p.id, hora: a.iso, gps: gps, cerroJornada: cerro });
+  marc = leer('Marcaciones', 30000);
+  return { hora: a.iso.substr(11, 5), cerroJornada: cerro, regresaHoy: regresaHoy, hoy: estadoHoy_(u, marc), resumen: resumen_(u, marc) };
+}
+// Regreso de un permiso por horas el mismo día
+function a_permisoRegresar(d, u) {
+  var a = ahora_(), p = buscar('Permisos', 'id', txt_(d.id, 40));
+  if (!p || p.cedula !== u.cedula || !p.salidaReal) throw E_('DATOS', 'No hay una salida a permiso para registrar el regreso.');
+  if (p.regresoReal) throw E_('DATOS', 'Ya registraste el regreso a las ' + p.regresoReal.substr(11, 5) + '.');
+  p.regresoReal = a.iso; p.gpsRegreso = isFinite(+d.lat) && isFinite(+d.lng) ? (+d.lat).toFixed(6) + ',' + (+d.lng).toFixed(6) : ''; guardar('Permisos', p);
+  var tarde = p.horaRegreso && a.iso.substr(11, 5) > p.horaRegreso ? Math.round((isoMs_(a.iso) - isoMs_(a.fecha + 'T' + p.horaRegreso)) / 60000) : 0;
+  if (tarde > (+cfg_().toleranciaMin || 0)) alertar_('permiso_uso', u.cedula, 'Regresó de su permiso a las ' + a.iso.substr(11, 5) + ', ' + tarde + ' min después de lo aprobado (' + p.horaRegreso + ').');
+  auditar_(u.cedula, 'permiso_regreso', { id: p.id, hora: a.iso, tarde: tarde });
+  var marc = leer('Marcaciones', 30000);
+  return { hora: a.iso.substr(11, 5), tarde: tarde, hoy: estadoHoy_(u, marc), resumen: resumen_(u, marc) };
 }
 function resumen_(u, marc) {
   var a = ahora_(), c = cfg_(), per = Motor.periodoDe(a.fecha, c.periodoNomina), L = legal_();
@@ -806,7 +889,7 @@ function a_registro(d) {
 }
 
 function a_login(d) {
-  var ced = soloDigitos_(d.cedula); limite_('login:' + ced, 30, 900); bloqueado_('lg:' + ced, 8); bloqueado_('login', 120);
+  var ced = soloDigitos_(d.cedula); limite_('login:' + ced, 30, 900); bloqueado_('lg:' + ced, 8); // el contador global solo alerta: si bloqueara, cualquiera podría dejar a la empresa sin ingreso
   var u = buscar('Usuarios', 'cedula', ced);
   if (!u || !u.hash || !verificarClave_(String(d.clave || ''), u.salt, u.hash)) {
     fallo_('lg:' + ced, 900);
@@ -816,13 +899,15 @@ function a_login(d) {
   if (u.estado === 'inactivo') throw E_('PERMISO', 'Tu usuario está inactivo. Habla con el administrador.');
   var c = cfg_(), dev = txt_(d.dispositivoId, 80), cambio = false;
   if (c.vincularDispositivo && u.rol === 'trabajador') {
-    if (u.dispositivoId && dev && u.dispositivoId !== dev) {
-      alertar_('seguridad', u.cedula, 'Intento de ingreso desde un celular distinto al vinculado.');
-      throw E_('DISPOSITIVO', 'Tu cuenta está vinculada a otro celular. Pide al administrador que autorice el cambio de equipo.');
+    if (!dev) throw E_('DISPOSITIVO', 'Esta empresa exige ingresar desde la aplicación en tu celular. Actualiza la aplicación e intenta de nuevo.');
+    if (u.dispositivoId && u.dispositivoId !== dev) {
+      alertar_('seguridad', u.cedula, 'Intentó ingresar desde un celular distinto al vinculado. Si cambió de celular, autorízalo en Personal → Editar → Liberar celular.');
+      throw E_('DISPOSITIVO', 'Tu cuenta está vinculada a otro celular. Ya avisamos al administrador: cuando autorice el cambio, vuelve a ingresar desde este celular.');
     }
-    if (!u.dispositivoId && dev) { u.dispositivoId = dev; cambio = true; }
+    if (!u.dispositivoId) { u.dispositivoId = dev; cambio = true; cerrarSesiones_(u.cedula); } // al vincular, se cierran las sesiones de otros equipos
   }
-  if (c.admin2FA && u.rol === 'admin' && u.email) {
+  if (c.admin2FA && u.rol === 'admin' && !u.email) throw E_('PERMISO', 'Tu cuenta de administrador no tiene correo y la empresa exige código por correo. Pide a otro administrador que registre tu correo.');
+  if (c.admin2FA && u.rol === 'admin') {
     var cch2 = CacheService.getScriptCache(), k2 = '2fa:' + u.cedula, esperado = cch2.get(k2);
     if (!d.codigo2fa) {
       var cod2 = codigo6_(); cch2.put(k2, cod2, 300);
@@ -861,21 +946,24 @@ function a_misDatos(d, u) {
 }
 
 function a_yo(d, u) {
+  if (u._kiosco) { var kc = centroDe_(u._kiosco), cf = cfg_(); return { kiosco: { centroId: u._kiosco, centro: kc ? kc.nombre : '', activadoPor: u.nombre }, ahora: ahora_().iso, version: VERSION, cfg: { empresa: cf.empresa, versionLegal: cf.versionLegal } }; }
   var c = cfg_(), a = ahora_(), marc = leer('Marcaciones', 30000);
   if (u.rol === 'admin' && !c.urlApp && /^https:\/\//.test(d.base || '')) cfgSet_('urlApp', txt_(d.base, 200));
   var o = { usuario: usuarioPublico_(u), ahora: a.iso, version: VERSION, licencia: licenciaEfectiva_(),
-    cfg: { empresa: c.empresa, versionLegal: c.versionLegal, recordatorioMin: c.recordatorioMin, periodoNomina: c.periodoNomina, diasAtrasManual: c.diasAtrasManual, geocercaEstricta: c.geocercaEstricta, horasLimitePermiso: c.horasLimitePermiso },
+    cfg: { empresa: c.empresa, versionLegal: c.versionLegal, recordatorioMin: c.recordatorioMin, periodoNomina: c.periodoNomina, diasAtrasManual: c.diasAtrasManual, geocercaEstricta: c.geocercaEstricta, horasLimitePermiso: c.horasLimitePermiso, compensarExtras: !!c.compensarExtras },
     centros: centros_().filter(function (x) { return x.activo; }).map(centroPub_), permisosCat: Motor.PERMISOS };
   if (u.estado !== 'activo') { o.centros = []; return o; } // sin aprobar no se entregan datos de la empresa
   o.hoy = estadoHoy_(u, marc); o.resumen = resumen_(u, marc);
-  var tomadas = 0; leer('Permisos').forEach(function (p) { if (p.cedula === u.cedula && p.tipo === 'vacaciones' && p.estado === 'aprobado') tomadas += Motor.diasHabiles(p.fechaSalida, Motor.sumar(p.fechaRegreso, -1), legal_(), false); });
+  var tomadas = 0; leer('Permisos').forEach(function (p) { if (p.cedula === u.cedula && p.tipo === 'vacaciones' && p.estado === 'aprobado') tomadas += Motor.diasHabiles(p.fechaSalida, Motor.sumar(p.fechaRegreso, -1), legal_(), sabadoHabil_(p.cedula)); });
   o.vacaciones = { causadas: Motor.vacacionesCausadas(u.ingreso, a.fecha), tomadas: tomadas };
   return o;
 }
 
 /* ---------- Marcaciones ---------- */
+var _marcaKiosco = false; // lo activa solo a_kioscoMarcar en el servidor; nunca viene del cliente
 function a_marcar(d, u) {
   if (u.estado !== 'activo') throw E_('PERMISO', 'Tu usuario aún no ha sido aprobado por el administrador.');
+  if (d.cedula && soloDigitos_(d.cedula) !== u.cedula) throw E_('AJENA', 'Esta marcación pertenece a otra persona que usó este celular. Debe enviarla ella al ingresar con su cuenta.');
   var c = cfg_(), a = ahora_(), tipo = d.tipo, marc = leer('Marcaciones', 30000);
   if (TIPOS.indexOf(tipo) < 0) throw E_('DATOS', 'Tipo de marcación no válido.');
   var mid = txt_(d.id, 40) || id_();
@@ -902,21 +990,32 @@ function a_marcar(d, u) {
   if (tiene[tipo]) throw E_('DUPLICADA', 'Ya registraste "' + NOMBRE_TIPO[tipo] + '" en esta jornada (' + tiene[tipo].substr(11, 5) + ').');
   if (tipo !== 'entrada' && !tiene.entrada) throw E_('ORDEN', 'Primero registra tu entrada. Si se te olvidó, puedes digitar la hora en que llegaste.');
   tiene[tipo] = hora; var ant = null;
-  TIPOS.forEach(function (t) { if (!tiene[t]) return; if (ant && isoMs_(tiene[t]) <= isoMs_(ant)) throw E_('ORDEN', 'La hora de "' + NOMBRE_TIPO[t] + '" debe ser posterior a la marcación anterior.'); ant = tiene[t]; });
+  TIPOS.forEach(function (t) { if (!tiene[t]) return; if (ant && isoMs_(tiene[t]) < isoMs_(ant)) throw E_('ORDEN', 'La hora de "' + NOMBRE_TIPO[t] + '" no puede ser anterior a la marcación anterior.'); ant = tiene[t]; });
   if (isoMs_(tiene[tipo]) - isoMs_(tiene.entrada) > 20 * 3600000) throw E_('ORDEN', 'La jornada no puede durar más de 20 horas. Revisa la hora.');
   // Centro, geocerca (polígono o radio), QR dinámico y detección anti-spoofing
   var prec = Math.round(+d.prec || 0);
   if (!manual && +c.maxPrecisionGps > 0 && prec > +c.maxPrecisionGps) throw E_('GPS_IMPRECISO', 'La señal GPS es muy imprecisa (' + prec + ' m). Muévete a un lugar despejado e intenta de nuevo.');
   var centro = (c.soloCentroAsignado && u.centroId) ? centroDe_(u.centroId) : (centroDe_(txt_(d.centroId, 20)) || centroDe_(u.centroId));
   var dist = '', enZona = '', sospechoso = !!d.gpsSospechoso, motivoSosp = sospechoso ? 'Lectura GPS repetida o sintética.' : '';
-  if (centro && centro.exigirQr && !manual && !validarQrCentro_(centro.id, d.qrCodigo)) {
-    throw E_('QR_REQUERIDO', 'Este centro exige escanear el código QR o ingresar el código del día vigente.');
+  var qrDia = false;
+  if (centro && centro.exigirQr && !_marcaKiosco && !_marcaPermiso) { // la tablet del kiosco está físicamente en la obra
+    var reciente = isoMs_(a.iso) - isoMs_(hora) < 15 * 60000;
+    if (!manual || reciente) {
+      var q = validarQrCentro_(centro.id, d.qrCodigo, offline ? hora.substr(0, 10) : a.fecha, offline ? a.ms - (isoMs_(a.iso) - isoMs_(hora)) : 0);
+      if (!q) throw E_('QR_REQUERIDO', 'Este centro exige escanear el código QR de la obra o escribir el código del día.');
+      qrDia = q === 'dia';
+      if (offline && isoMs_(a.iso) - isoMs_(hora) > 30 * 60000) { sospechoso = true; motivoSosp = 'QR de obra presentado más de 30 min después de la hora declarada (sin conexión).'; }
+    }
   }
   if (centro && centro.poligono && centro.poligono.length >= 3) {
     if (centro.lat !== null && centro.lng !== null) dist = distancia_(lat, lng, centro.lat, centro.lng);
     enZona = enPoligono_(lat, lng, centro.poligono) ? '1' : '0';
   } else if (centro && centro.lat !== null && centro.lng !== null) {
     dist = distancia_(lat, lng, centro.lat, centro.lng); enZona = dist <= centro.radio + Math.min(prec, 50) ? '1' : '0';
+  }
+  if (qrDia && enZona !== '1') { // el código del día no prueba presencia: exige estar dentro de la obra
+    if (!offline) throw E_('QR_REQUERIDO', 'El código del día solo sirve dentro de la obra. Escanea el QR de la portería.');
+    sospechoso = true; motivoSosp = motivoSosp || 'Usó el código del día sin conexión y fuera de la geocerca.';
   }
   if (enZona === '0' && c.geocercaEstricta && !manual) throw E_('FUERA_ZONA', 'Estás fuera de ' + centro.nombre + (dist !== '' ? ' (a ' + dist + ' m)' : '') + '. Acércate al centro de trabajo para marcar.');
   // Velocidad imposible respecto a la marcación anterior del mismo día
@@ -930,7 +1029,7 @@ function a_marcar(d, u) {
   }
   // Foto aleatoria u obligatoria por anomalía
   var anomaliaFoto = c.fotoEnAnomalia && (enZona === '0' || sospechoso || prec > 60);
-  var exigida = !manual && (fotoRequerida_(u.cedula, fecha, tipo) || anomaliaFoto), fotoId = '', estado = (manual || sospechoso) ? 'revisar' : 'ok';
+  var exigida = !manual && !_marcaPermiso && (fotoRequerida_(u.cedula, fecha, tipo) || anomaliaFoto), fotoId = '', estado = (manual || sospechoso) ? 'revisar' : 'ok';
   if (sospechoso) alertar_('gps_sospechoso', u.cedula, motivoSosp + ' (' + NOMBRE_TIPO[tipo] + ', ' + hora.replace('T', ' ') + ')');
   var tardio = offline && isoMs_(a.iso) - isoMs_(hora) > 20 * 60000; if (tardio) estado = 'revisar'; // llegó sin conexión con hora del celular: la revisa el administrador
   if (d.foto) fotoId = guardarImagen_(d.foto, u.cedula + '_' + hora.replace(/[:T]/g, '-') + '_' + tipo + '.jpg', 'CARPETA_FOTOS');
@@ -944,7 +1043,7 @@ function a_marcar(d, u) {
     alertar_('tardanza', u.cedula, 'Marcó entrada a las ' + hora.substr(11, 5) + ' (horario ' + hor.e + ')' + (centro ? ' en ' + centro.nombre : '') + '. Retraso: ' + (Motor.aMin(hora.substr(11, 5)) - Motor.aMin(hor.e)) + ' min.');
   if (enZona === '0') alertar_('fuera_zona', u.cedula, NOMBRE_TIPO[tipo] + ' a ' + dist + ' m de ' + centro.nombre + ' (radio permitido ' + centro.radio + ' m). Consulta la ubicación en el panel, sección Marcaciones.');
   if (tardio) alertar_('marcacion_manual', u.cedula, '"' + NOMBRE_TIPO[tipo] + '" del ' + fecha + ' a las ' + hora.substr(11, 5) + ' se registró sin conexión y llegó al servidor ' + Math.round((isoMs_(a.iso) - isoMs_(hora)) / 60000) + ' min después. La hora es la del celular: revísala.');
-  if (manual) alertar_('marcacion_manual', u.cedula, 'Digitó "' + NOMBRE_TIPO[tipo] + '" del ' + fecha + ' a las ' + hora.substr(11, 5) + '. Motivo: ' + txt_(d.motivo, 200));
+  if (manual) alertar_('marcacion_manual', u.cedula, 'Digitó "' + NOMBRE_TIPO[tipo] + '" del ' + fecha + ' a las ' + hora.substr(11, 5) + '. El motivo está en Marcaciones.');
   if (exigida && !fotoId) alertar_('sin_foto', u.cedula, NOMBRE_TIPO[tipo] + ' del ' + fecha + ' llegó sin la foto exigida (se registró sin conexión).');
   if (tipo === 'salida' || tiene.salida) recalcularExtras_(u.cedula, fecha, marc);
   return { hora: hora, fecha: fecha, enZona: enZona, dist: dist, hoy: estadoHoy_(u, marc), resumen: resumen_(u, marc) };
@@ -991,7 +1090,7 @@ function tokenFirma_(pid, jid) { return hmac_('firma|' + pid + '|' + jid).substr
 function enlaceFirma_(pid, jid) { return (cfg_().urlApp || '').replace(/[#?].*$/, '') + '#/firma/' + pid + '.' + jid + '.' + tokenFirma_(pid, jid); }
 function permisoPub_(p, conEnlaces) {
   var firmas = json_(p.firmas, []), u = buscar('Usuarios', 'cedula', p.cedula), cat = Motor.PERMISOS.filter(function (x) { return x.id === p.tipo; })[0] || {};
-  var o = { id: p.id, cedula: p.cedula, nombre: u ? u.nombre : '', cargo: u ? u.cargo : '', tipo: p.tipo, tipoNombre: cat.nombre || p.tipo, norma: cat.norma || '', cat: p.cat, remunerado: p.remunerado === '1',
+  var o = { salidaReal: p.salidaReal || '', regresoReal: p.regresoReal || '', id: p.id, cedula: p.cedula, nombre: u ? u.nombre : '', cargo: u ? u.cargo : '', tipo: p.tipo, tipoNombre: cat.nombre || p.tipo, norma: cat.norma || '', cat: p.cat, remunerado: p.remunerado === '1',
     fechaSalida: p.fechaSalida, horaSalida: p.horaSalida, fechaRegreso: p.fechaRegreso, horaRegreso: p.horaRegreso, motivo: p.motivo, soporte: p.soporte, estado: p.estado, creado: p.creado, limite: p.limite,
     decididoPor: p.decididoPor, decididoEl: p.decididoEl, obs: p.obs,
     firmas: firmas.map(function (f) { return { id: f.id, nombre: f.nombre, cargo: f.cargo, estado: f.estado, fecha: f.fecha, obs: f.obs, firma: f.firma, whatsapp: conEnlaces ? f.whatsapp : undefined, enlace: conEnlaces && f.estado === 'pendiente' ? enlaceFirma_(p.id, f.id) : undefined }; }) };
@@ -1021,7 +1120,7 @@ function a_permisoCrear(d, u, req, adm) {
   if (adm) { auditar_(adm.cedula, 'permiso_registrado', { id: p.id, cedula: u.cedula, tipo: p.tipo, desde: p.fechaSalida, hasta: p.fechaRegreso }); return permisoPub_(p, false); }
   var resumen = cat.nombre + '\nSale: ' + p.fechaSalida + ' ' + hs + '\nRegresa: ' + p.fechaRegreso + ' ' + hr + '\nMotivo: ' + p.motivo;
   jefes_().forEach(function (j) { if (j.email && firmas.some(function (f) { return f.id === j.id; })) correo_(j.email, 'Permiso por firmar: ' + u.nombre, u.nombre + ' (C.C. ' + u.cedula + ') solicita:\n' + resumen + '\n\nFirma o rechaza aquí (necesitas tu clave de firma):\n' + enlaceFirma_(pid, j.id)); });
-  alertar_('permiso_nuevo', u.cedula, resumen);
+  alertar_('permiso_nuevo', u.cedula, cat.nombre + '. Sale: ' + p.fechaSalida + ' ' + hs + '. Regresa: ' + p.fechaRegreso + ' ' + hr + '. El motivo está en Permisos.'); // los datos de salud no se copian a alertas ni a Telegram
   return permisoPub_(p, true);
 }
 function a_adminPermisoRegistrar(d, adm) { var u = buscar('Usuarios', 'cedula', soloDigitos_(d.cedula)); if (!u) throw E_('DATOS', 'Elige la persona.'); return a_permisoCrear(d, u, null, adm); }
@@ -1075,7 +1174,7 @@ function a_firmaResponder(d) {
 }
 
 function a_desprendibles(d, u) {
-  return leer('Nomina').filter(function (n) { return n.cedula === u.cedula; }).reverse().slice(0, 36).map(function (n) { return { id: n.id, desde: n.desde, hasta: n.hasta, neto: +n.neto, generado: n.generado, detalle: json_(n.detalle, {}) }; });
+  return leer('Nomina').filter(function (n) { return n.cedula === u.cedula; }).reverse().slice(0, 36).map(function (n) { return { id: n.id, desde: n.desde, hasta: n.hasta, neto: +n.neto, generado: n.generado, acuse: n.acuse || '', detalle: json_(n.detalle, {}) }; });
 }
 function a_error(d, u, req) {
   limite_('err', 120, 3600);
@@ -1177,6 +1276,7 @@ function a_adminCentroGuardar(d, adm) {
   c.festivos = d.festivos ? '1' : ''; c.activo = d.activo === false ? '0' : '1';
   var poly = Array.isArray(d.poligono) ? d.poligono.filter(function (pt) { return Array.isArray(pt) && pt.length === 2 && !isNaN(+pt[0]) && !isNaN(+pt[1]); }).map(function (pt) { return [+(+pt[0]).toFixed(6), +(+pt[1]).toFixed(6)]; }) : [];
   c.poligono = poly.length >= 3 ? JSON.stringify(poly) : '';
+  c.arlPct = +d.arlPct > 0 ? String(Math.min(6.96, Math.max(0.348, +d.arlPct))) : '';
   c.exigirQr = d.exigirQr ? '1' : '';
   c.presupuestoHoras = +d.presupuestoHoras > 0 ? String(Math.round(+d.presupuestoHoras)) : '';
   c.presupuestoCosto = +d.presupuestoCosto > 0 ? String(Math.round(+d.presupuestoCosto)) : '';
@@ -1291,14 +1391,29 @@ function a_adminExtraDecidir(d, adm) {
     if (!(min > 0) || min > +x.minCalc) throw E_('DATOS', 'Los minutos aprobados deben estar entre 1 y ' + x.minCalc + '.');
     if (min > L.maxExtraDiaH * 60 && !d.confirmaTope) throw E_('TOPE', 'Vas a aprobar más de ' + L.maxExtraDiaH + ' horas extra en un día, por encima del máximo legal. Confirma si cuentas con autorización del Ministerio del Trabajo.');
   }
-  var aComp = d.decision === 'aprobar' && !!d.aCompensatorio;
+  var aComp = d.decision === 'aprobar' && !!d.aCompensatorio, previo = buscar('Compensatorios', 'id', 'EXT|' + x.id);
+  if (aComp && !cfg_().compensarExtras) throw E_('DATOS', 'Abonar horas extra a compensatorio está desactivado (Configuración → Reglas). El Ministerio del Trabajo considera que las horas extra se pagan con su recargo.');
+  // 2. al cambiar la decisión no puede quedar saldo negativo (el descanso ya disfrutado no se devuelve)
+  if (previo && saldoCompensatorio_(x.cedula) - (+previo.minutos || 0) < 0) throw E_('DATOS', 'Esas horas ya se tomaron como descanso: no se puede cambiar la decisión sin dejar el saldo en negativo.');
+  if (aComp && !d.soporte) throw E_('DATOS', 'Adjunta la foto del acuerdo firmado con el trabajador para abonar a compensatorio.');
+  if (aComp && txt_(d.obs, 200).length < 5) throw E_('DATOS', 'Para abonar a compensatorio escribe en la observación el acuerdo con el trabajador (por ejemplo: "acuerdo firmado del 3 de noviembre").');
+  if (previo) borrar('Compensatorios', previo); // al cambiar la decisión se reversa el abono anterior: nunca queda doble
+  var minComp = aComp ? minutosCompensatorio_(x, min) : 0;
   x.estado = d.decision === 'aprobar' ? 'aprobada' : 'rechazada'; x.minAprob = aComp ? 0 : min; x.decididoPor = adm.cedula; x.decididoEl = ahora_().iso; x.obs = txt_(d.obs, 200) + (d.confirmaTope ? ' [Aprobado por encima del tope legal]' : '') + (aComp ? ' [Abonado a banco de compensatorios: ' + min + ' min]' : '');
   guardar('Extras', x);
-  if (aComp && min > 0) agregar('Compensatorios', { id: id_(), cedula: x.cedula, fecha: x.fecha, minutos: String(min), tipo: 'abono', motivo: 'Horas extra del ' + x.fecha, creadoPor: adm.cedula, creado: ahora_().iso });
+  if (aComp && min > 0) agregar('Compensatorios', { soporte: guardarImagen_(d.soporte, 'acuerdo_extra_' + x.cedula + '_' + x.fecha + '.jpg', 'CARPETA_FOTOS'), id: 'EXT|' + x.id, cedula: x.cedula, fecha: x.fecha, minutos: String(minComp), tipo: 'abono', motivo: min + ' min extra del ' + x.fecha + ' con su recargo = ' + minComp + ' min de descanso. ' + txt_(d.obs, 120), creadoPor: adm.cedula, creado: ahora_().iso });
   auditar_(adm.cedula, 'extra_' + x.estado, { cedula: x.cedula, fecha: x.fecha, min: min, tope: !!d.confirmaTope, aCompensatorio: aComp }); return {};
 }
 
 /* ---------- Horas extra en lote y novedades de pago (bonos, auxilios, descuentos) ---------- */
+// Las horas extra llevan recargo (CST art. 168): el descanso equivalente es minutos × (1 + recargo de cada minuto).
+function minutosCompensatorio_(x, min) {
+  var u = buscar('Usuarios', 'cedula', x.cedula), L = legal_(), cfgM = Motor.cfg(L);
+  var dias = marcarLibres_(diasDe_(leer('Marcaciones', 30000), x.cedula, Motor.lunesDe(x.fecha), x.fecha), u), ext = {}; ext[x.fecha] = min;
+  var r = Motor.liquidarDias(dias, L, ext)[x.fecha]; if (!r) return Math.round(min * (1 + cfgM.extraDiurna));
+  var rd = Motor.recDominical(x.fecha, cfgM);
+  return Math.round(r.extDiu * (1 + cfgM.extraDiurna) + r.extNoc * (1 + cfgM.extraNocturna) + r.extDomDiu * (1 + cfgM.extraDiurna + rd) + r.extDomNoc * (1 + cfgM.extraNocturna + rd));
+}
 function a_adminExtrasLote(d, adm) {
   var L = legal_(), n = 0, a = ahora_(), ids = {}; (d.ids || []).forEach(function (x) { ids[x] = 1; });
   leer('Extras').forEach(function (x) {
@@ -1327,10 +1442,10 @@ function a_adminNovedadGuardar(d, adm) {
 /* ---------- Nómina ---------- */
 function liquidarTodos_(desde, hasta, corte) {
   var marc = leer('Marcaciones'), L = legal_(), cs = {}; centros_().forEach(function (c) { cs[c.id] = c.nombre; });
-  return leer('Usuarios').filter(function (u) { return (u.estado === 'activo' || (u.estado === 'inactivo' && u.hash)) && +u.salario > 0; }).map(function (u) {
+  return leer('Usuarios').filter(function (u) { return !(u.liquidado && u.liquidado >= desde && u.liquidado <= hasta) && (u.estado === 'activo' || (u.estado === 'inactivo' && u.hash)) && +u.salario > 0; }).map(function (u) {
     var liq = Motor.liquidarPeriodo(insumos_(u, desde, hasta, corte, marc), L);
-    return { cedula: u.cedula, nombre: u.nombre, cargo: u.cargo, centroId: u.centroId, centro: cs[u.centroId] || '', salario: +u.salario, salarioOk: u.salarioOk === '1', tipoPago: u.tipoPago || 'mensual', estado: u.estado, liq: liq };
-  }).filter(function (x) { return x.estado === 'activo' || x.liq.diasTrabajados > 0; });
+    return { cedula: u.cedula, nombre: u.nombre, cargo: u.cargo, centroId: u.centroId, centro: cs[u.centroId] || '', salario: +u.salario, salarioOk: u.salarioOk === '1', tipoPago: u.tipoPago || 'mensual', estado: u.estado, retiro: String(u.retiro || '').substr(0, 10), liq: liq };
+  }).filter(function (x) { return x.estado === 'activo' || x.liq.diasTrabajados > 0 || (x.retiro && x.retiro >= desde && x.liq.devengado > 0); }); // retirado en o después de este periodo: se le paga aunque no haya marcado (vacaciones, incapacidad)
 }
 function a_adminNominaPrevia(d) {
   var r = rango_(d, 31), corte = r.hasta < r.hoy ? r.hasta : r.hoy;
@@ -1346,14 +1461,9 @@ function a_adminNominaCerrar(d, adm) {
   if (leer('Periodos').some(function (p) { return p.desde <= r.hasta && r.desde <= p.hasta; })) throw E_('CERRADO', 'Ya existe una nómina cerrada que cubre esas fechas.');
   var rev = leer('Marcaciones').filter(function (m) { return m.estado === 'revisar' && m.fecha >= r.desde && m.fecha <= r.hasta; }).length;
   if (rev) throw E_('REVISAR', 'Hay ' + rev + ' marcación(es) digitadas o tardías sin revisar en este periodo. Revísalas en Marcaciones antes de cerrar: con ellas se va a pagar.');
-  // Descuento automático de cuotas de préstamos activos en el cierre de nómina
-  if (d.descontarPrestamos !== false) {
-    leer('Prestamos').filter(function (p) { return p.estado === 'activo' && +p.saldo > 0; }).forEach(function (p) {
-      var ya = leer('Novedades').some(function (n) { return n.cedula === p.cedula && n.fecha >= r.desde && n.fecha <= r.hasta && n.concepto === 'Cuota: ' + p.concepto; });
-      if (!ya) a_adminPrestamoAplicarCuota({ id: p.id, fecha: r.hasta }, adm);
-    });
-  }
   var filas = liquidarTodos_(r.desde, r.hasta, r.hasta);
+  // Cuotas de préstamos: una por préstamo y periodo, solo a quien se le liquida y sin bajar del mínimo legal
+  if (d.descontarPrestamos !== false && moduloActivo_('prestamos') && aplicarCuotasPrestamos_(r, filas, adm).length) { _c = {}; filas = liquidarTodos_(r.desde, r.hasta, r.hasta); }
   filas.forEach(function (x) {
     var det = sinDetalle_(x.liq); det.empresa = { nombre: c.empresa.nombre, nit: c.empresa.nit }; det.persona = { nombre: x.nombre, cedula: x.cedula, cargo: x.cargo, centro: x.centro, salario: x.salario, tipoPago: x.tipoPago };
     agregar('Nomina', { id: r.desde + '|' + r.hasta + '|' + x.cedula, desde: r.desde, hasta: r.hasta, cedula: x.cedula, nombre: x.nombre, neto: x.liq.neto, detalle: JSON.stringify(det), generado: a.iso });
@@ -1387,19 +1497,45 @@ function a_adminLiberarDispositivo(d, adm) {
   return { ok: true };
 }
 
+// Supresión (Ley 1581 art. 8 lit. e). Se borra todo lo que no es obligatorio conservar. Se conservan, con la cédula,
+// los registros de nómina, jornada y novedades exigidos por la ley laboral (CST art. 264, Ley 962 de 2005 art. 28) y la
+// auditoría, que es prueba de integridad; las copias de seguridad desaparecen solas al rotar.
 function a_adminAnonimizarUsuario(d, adm) {
   var u = buscar('Usuarios', 'cedula', soloDigitos_(d.cedula));
   if (!u) throw E_('DATOS', 'No se encontró la persona.');
   if (u.estado !== 'inactivo') throw E_('DATOS', 'Primero desactiva a la persona antes de suprimir sus datos personales.');
-  u.nombre = 'Exempleado ' + sha_(u.cedula + '|' + prop_('SECRETO')).substr(0, 8).toUpperCase();
-  u.email = ''; u.telefono = ''; u.eps = ''; u.arl = ''; u.banco = ''; u.tipoCuenta = ''; u.cuenta = '';
-  u.dispositivoId = ''; u.hash = ''; u.salt = ''; u.codigo = '';
-  if (u.fotoRef) { try { DriveApp.getFileById(u.fotoRef).setTrashed(true); } catch (e) { } u.fotoRef = ''; }
-  guardar('Usuarios', u); cerrarSesiones_(u.cedula);
-  auditar_(adm.cedula, 'anonimizar_usuario', u.cedula);
-  return { ok: true };
+  var ced = u.cedula, n = { marcaciones: 0, permisos: 0, incapacidades: 0, archivos: 0 };
+  var tirar = function (id) { if (!id) return; try { DriveApp.getFileById(id).setTrashed(true); n.archivos++; } catch (e) { } };
+  u.nombre = 'Exempleado ' + sha_(ced + '|' + prop_('SECRETO')).substr(0, 8).toUpperCase();
+  u.email = ''; u.telefono = ''; u.eps = ''; u.arl = ''; u.banco = ''; u.tipoCuenta = ''; u.cuenta = ''; u.cargo = '';
+  u.dispositivoId = ''; u.hash = ''; u.salt = ''; u.codigo = ''; u.salario = '0'; u.supCentros = '';
+  tirar(u.fotoRef); u.fotoRef = '';
+  guardar('Usuarios', u); cerrarSesiones_(ced);
+  leer('Marcaciones').forEach(function (m) { if (m.cedula !== ced) return; tirar(m.foto); m.lat = ''; m.lng = ''; m.prec = ''; m.dist = ''; m.foto = ''; m.motivo = m.motivo ? '[suprimido]' : ''; guardar('Marcaciones', m); n.marcaciones++; });
+  leer('Permisos').forEach(function (p) { if (p.cedula !== ced) return; tirar(p.soporte); p.soporte = ''; p.motivo = '[suprimido]'; p.obs = ''; guardar('Permisos', p); n.permisos++; });
+  leer('Incapacidades').forEach(function (x) { if (x.cedula !== ced) return; tirar(x.soporte); x.soporte = ''; x.nota = ''; x.entidad = ''; guardar('Incapacidades', x); n.incapacidades++; });
+  leer('Prestamos').forEach(function (p) { if (p.cedula === ced && p.autorizacion && p.estado !== 'activo') { tirar(p.autorizacion); p.autorizacion = 'suprimida'; guardar('Prestamos', p); } });
+  if (HOJAS.Certificados) leer('Certificados').filter(function (x) { return x.cedula === ced; }).sort(function (a, b) { return b._f - a._f; }).forEach(function (x) { borrar('Certificados', x); });
+  leer('Comunicados').forEach(function (c) { var l = json_(c.leidos, {}); if (l[ced]) { delete l[ced]; c.leidos = JSON.stringify(l); guardar('Comunicados', c); } });
+  leer('Alertas').forEach(function (x) { if (x.cedula === ced && x.detalle !== '[suprimido]') { x.detalle = '[suprimido]'; guardar('Alertas', x); } });
+  leer('Errores').forEach(function (x) { if (x.cedula === ced) { x.detalle = ''; x.mensaje = '[suprimido]'; x.equipo = ''; guardar('Errores', x); } });
+  suprimirEnHistorico_(ced);
+  auditar_(adm.cedula, 'suprimir_datos', { marcaciones: n.marcaciones, permisos: n.permisos, incapacidades: n.incapacidades, archivos: n.archivos });
+  return { ok: true, suprimido: n, conservado: 'Cédula, fechas y horas de jornada, nómina, novedades y auditoría: se conservan por obligación legal (CST art. 264; Ley 962 de 2005 art. 28).' };
 }
 
+function suprimirEnHistorico_(ced) {
+  var id = prop_('CARPETA_HISTORICO'); if (!id) return;
+  try {
+    var arch = DriveApp.getFolderById(id).getFiles(), cols = HOJAS.Marcaciones, iC = cols.indexOf('cedula');
+    while (arch.hasNext()) {
+      var h = SpreadsheetApp.openById(arch.next().getId()).getSheetByName('Marcaciones'); if (!h || h.getLastRow() < 2) continue;
+      var r = h.getRange(2, 1, h.getLastRow() - 1, cols.length), v = r.getValues(), cambio = false;
+      v.forEach(function (f) { if (String(f[iC]).replace(/^'/, '') === ced) { ['lat', 'lng', 'prec', 'dist', 'foto', 'motivo'].forEach(function (k) { if (f[cols.indexOf(k)] !== '') { f[cols.indexOf(k)] = ''; cambio = true; } }); } });
+      if (cambio) r.setValues(v);
+    }
+  } catch (e) { registrarError_('suprimir_historico', e); }
+}
 function a_adminIncapacidadEditar(d, adm) {
   var inc = buscar('Incapacidades', 'id', txt_(d.id, 40));
   if (!inc) throw E_('DATOS', 'No se encontró la incapacidad.');
@@ -1453,6 +1589,9 @@ function a_adminConfig() {
 }
 function a_adminConfigGuardar(d, adm) {
   var cambios = [];
+  if (d.admin2FA) { var sinCorreo = leer('Usuarios').filter(function (u) { return u.rol === 'admin' && u.estado === 'activo' && !u.email; }).map(function (u) { return u.nombre; });
+    if (sinCorreo.length) throw E_('DATOS', 'Antes de exigir el código por correo, registra el correo de: ' + sinCorreo.join(', ') + '.'); }
+  if (d.arlPct !== undefined && (+d.arlPct < 0.348 || +d.arlPct > 6.96)) throw E_('DATOS', 'La tarifa de ARL va de 0,348 % (riesgo I) a 6,96 % (riesgo V).');
   Object.keys(d).forEach(function (k) {
     if (k === 'telegramToken') { if (d[k]) { prop_('TELEGRAM_TOKEN', txt_(d[k], 120)); cambios.push('telegramToken'); } return; }
     if (!(k in CFG_DEF) || k === 'zona') return; var v = d[k], def = CFG_DEF[k];
@@ -1461,6 +1600,7 @@ function a_adminConfigGuardar(d, adm) {
     else if (typeof def === 'string') v = txt_(v, 300);
     else if (k === 'legal') { var L = {}; Object.keys(v || {}).forEach(function (q) { if (!(q in Motor.DEF)) return; if (q === 'festivosExtra') L[q] = (v[q] || []).filter(function (f) { return /^\d{4}-\d\d-\d\d$/.test(f); }); else if (typeof Motor.DEF[q] === 'string') L[q] = /^\d\d:\d\d$/.test(v[q]) ? v[q] : Motor.DEF[q]; else if (typeof Motor.DEF[q] === 'boolean') L[q] = !!v[q]; else if (v[q] !== '' && v[q] !== null && !isNaN(+v[q])) L[q] = +v[q]; }); v = L; }
     else if (k === 'empresa') { var e = {}; Object.keys(CFG_DEF.empresa).forEach(function (q) { e[q] = txt_((v || {})[q], q === 'logo' ? 40000 : 200); }); if (e.logo && !/^data:image\/(png|jpeg|webp);base64,/.test(e.logo) && !/^https:\/\//.test(e.logo)) e.logo = ''; if (e.color && !/^#[0-9a-fA-F]{6}$/.test(e.color)) e.color = ''; v = e; }
+    else if (k === 'contactosEmergencia') { v = (Array.isArray(v) ? v : []).slice(0, 10).map(function (x) { return { nombre: txt_(x && x.nombre, 80), rol: txt_(x && x.rol, 40), telefono: soloDigitos_(x && x.telefono).substr(0, 15) }; }).filter(function (x) { return x.nombre && x.telefono; }); }
     else if (k === 'codigosConcepto') { var cc = {}; Object.keys(v || {}).forEach(function (q) { if (/^[A-Z]{2,5}$/.test(q) && txt_(v[q], 20)) cc[q] = txt_(v[q], 20); }); v = cc; }
     else if (k === 'alertas') { var al = {}; Object.keys(TIPOS_ALERTA).forEach(function (q) { var x = (v || {})[q] || {}; al[q] = { activo: x.activo !== false, correos: txt_(x.correos, 300) }; }); v = al; }
     cfgSet_(k, v); cambios.push(k);
@@ -1480,14 +1620,18 @@ function a_adminBitacoras(d) {
   var n = { alertas: 'Alertas', auditoria: 'Auditoria', errores: 'Errores' }[d.cual]; if (!n) throw E_('DATOS', 'Bitácora desconocida.');
   return leer(n, 400).reverse().map(function (r) { var o = {}; HOJAS[n].forEach(function (k) { o[k] = r[k]; }); return o; });
 }
+// Verifica la cadena: cada fila firma la anterior. Además compara contra el último eslabón y el total guardados
+// fuera de la hoja, así que borrar hashes o filas del final también se detecta.
 function a_adminVerificarAuditoria() {
-  var filas = leer('Auditoria'), ant = 'GENESIS', alteradas = [];
+  var filas = leer('Auditoria'), ant = 'GENESIS', alteradas = [], desde = prop_('AUD_DESDE') || '', conHash = 0, ult = '';
   filas.forEach(function (r) {
-    if (!r.hash) { ant = ''; return; } // filas anteriores a v1.4.1
+    if (!r.hash) { if (desde && r.fecha >= desde) alteradas.push({ fila: r._f, fecha: r.fecha, accion: r.accion + ' (sin firma)' }); ant = ''; return; }
     var esp = hmac_(ant + '|' + r.fecha + '|' + r.actor + '|' + r.accion + '|' + r.detalle).substr(0, 32);
     if (!igualSeguro_(r.hash, esp)) alteradas.push({ fila: r._f, fecha: r.fecha, accion: r.accion });
-    ant = r.hash;
+    ant = r.hash; ult = r.hash; conHash++;
   });
+  var nEsp = +(prop_('AUD_N') || 0), ultEsp = prop_('AUD_ULT') || '';
+  if (nEsp && (conHash !== nEsp || ult !== ultEsp)) alteradas.push({ fila: '', fecha: '', accion: 'Faltan registros: se esperaban ' + nEsp + ' firmados y hay ' + conHash + '.' });
   return { total: filas.length, integra: alteradas.length === 0, alteradas: alteradas.slice(0, 50) };
 }
 function a_adminSalud() {
@@ -1534,7 +1678,7 @@ function a_adminExportar(d) {
       return { 'Cédula': x.cedula, Nombre: x.nombre, 'Centro de trabajo': x.centro, Salario: x.salario, 'Días liquidados': q.diasNomina, 'Horas trabajadas': q.horas.trabajadas, 'Horas extra pagadas': q.horas.extras, 'Horas extra sin aprobar': q.horas.extrasSinAprobar, Ausencias: q.ausencias, Tardanzas: q.tardanzas,
         'Salario básico': v('SAL'), 'Recargos y dominicales': v('RN') + v('DF') + v('DFN'), 'Horas extra $': v('HED') + v('HEN') + v('HEDF') + v('HENF'), 'Auxilio transporte': v('AUX'), Devengado: q.devengado, Deducciones: q.deducciones, 'Neto a pagar': q.neto }; }),
     'Vacaciones y ausentismo': (function () { var hoy = ahora_().fecha, tom = {}, ex = {};
-      leer('Permisos').forEach(function (p) { if (p.tipo === 'vacaciones' && p.estado === 'aprobado') tom[p.cedula] = (tom[p.cedula] || 0) + Motor.diasHabiles(p.fechaSalida, Motor.sumar(p.fechaRegreso, -1), legal_(), false); });
+      leer('Permisos').forEach(function (p) { if (p.tipo === 'vacaciones' && p.estado === 'aprobado') tom[p.cedula] = (tom[p.cedula] || 0) + Motor.diasHabiles(p.fechaSalida, Motor.sumar(p.fechaRegreso, -1), legal_(), sabadoHabil_(p.cedula)); });
       previa.filas.forEach(function (x) { ex[x.cedula] = x.liq; });
       return leer('Usuarios').filter(function (u) { return u.estado === 'activo'; }).map(function (u) { var c = Motor.vacacionesCausadas(u.ingreso, hoy), q = ex[u.cedula];
         return { 'Cédula': u.cedula, Nombre: u.nombre, Ingreso: String(u.ingreso).substr(0, 10), 'Vacaciones causadas (días hábiles)': c, 'Vacaciones disfrutadas': tom[u.cedula] || 0, 'Saldo de vacaciones': Math.round((c - (tom[u.cedula] || 0)) * 10) / 10,
@@ -1546,7 +1690,7 @@ function a_adminExportar(d) {
 function registrarAcciones_() {
   var P = 'publico', U = 'usuario', A = 'admin', V = 'supervisor';
   [['publico', P, 0, a_publico], ['consultarCedula', P, 0, a_consultarCedula], ['registro', P, 1, a_registro], ['login', P, 1, a_login], ['firmaVer', P, 0, a_firmaVer], ['firmaResponder', P, 1, a_firmaResponder], ['error', P, 1, a_error], ['recuperarPedir', P, 1, a_recuperarPedir], ['recuperarCambiar', P, 1, a_recuperarCambiar],
-   ['salir', U, 1, a_salir], ['cambiarClave', U, 1, a_cambiarClave], ['consentir', U, 1, a_consentir], ['misDatos', U, 1, a_misDatos], ['yo', U, 0, a_yo], ['marcar', U, 1, a_marcar], ['bloqueo', U, 1, a_bloqueo], ['historial', U, 0, a_historial],
+   ['salir', U, 1, a_salir], ['cambiarClave', U, 1, a_cambiarClave], ['consentir', U, 1, a_consentir], ['misDatos', U, 1, a_misDatos], ['yo', U, 0, a_yo], ['marcar', U, 1, a_marcar], ['permisoSalir', U, 1, a_permisoSalir], ['permisoRegresar', U, 1, a_permisoRegresar], ['bloqueo', U, 1, a_bloqueo], ['historial', U, 0, a_historial],
    ['permisoCrear', U, 1, a_permisoCrear], ['permisosMios', U, 0, a_permisosMios], ['permisoCancelar', U, 1, a_permisoCancelar], ['desprendibles', U, 0, a_desprendibles],
    ['adminTablero', V, 0, a_adminTablero], ['adminPersonal', A, 0, a_adminPersonal], ['adminPersonaGuardar', A, 1, a_adminPersonaGuardar], ['adminPersonaCodigo', A, 1, a_adminPersonaCodigo], ['adminPersonaImportar', A, 1, a_adminPersonaImportar],
    ['adminCentros', V, 0, a_adminCentros], ['adminCentroGuardar', A, 1, a_adminCentroGuardar], ['adminMarcaciones', V, 0, a_adminMarcaciones], ['adminMarcacionGuardar', A, 1, a_adminMarcacionGuardar], ['adminMarcacionRevisada', A, 1, a_adminMarcacionRevisada], ['adminFoto', V, 0, a_adminFoto],
@@ -1558,12 +1702,12 @@ function registrarAcciones_() {
    ['adminInforme', V, 0, a_adminInforme], ['miResumen', U, 0, a_miResumen],
    ['adminTurnos', A, 0, a_adminTurnos], ['adminTurnoGuardar', A, 1, a_adminTurnoGuardar], ['adminProgramar', A, 1, a_adminProgramar], ['adminProgramacionBorrar', A, 1, a_adminProgramacionBorrar],
    ['confirmarDesprendible', U, 1, a_confirmarDesprendible, 'nomina'], ['adminLiberarDispositivo', A, 1, a_adminLiberarDispositivo, 'seguridadPro'], ['adminAnonimizarUsuario', A, 1, a_adminAnonimizarUsuario], ['adminIncapacidadEditar', A, 1, a_adminIncapacidadEditar, 'permisos'], ['adminTrasladoMasivo', A, 1, a_adminTrasladoMasivo], ['adminQrCentro', V, 0, a_adminQrCentro, 'qr'],
-   ['kioscoMarcar', V, 1, a_kioscoMarcar, 'kiosco'],
-   ['adminProvisiones', A, 0, a_adminProvisiones, 'nomina'], ['adminLiquidacionContrato', A, 0, a_adminLiquidacionContrato, 'nomina'], ['adminPrestamos', A, 0, a_adminPrestamos, 'prestamos'], ['adminPrestamoGuardar', A, 1, a_adminPrestamoGuardar, 'prestamos'], ['adminPrestamoAplicarCuota', A, 1, a_adminPrestamoAplicarCuota, 'prestamos'],
-   ['misCompensatorios', U, 0, a_misCompensatorios, 'nomina'], ['adminCompensatorioGuardar', A, 1, a_adminCompensatorioGuardar, 'nomina'], ['certificadoLaboral', U, 0, a_certificadoLaboral, 'autoservicio'],
+   ['kioscoMarcar', U, 1, a_kioscoMarcar, 'kiosco'], ['kioscoIniciar', V, 1, a_kioscoIniciar, 'kiosco'], ['kioscoSalir', U, 1, a_kioscoSalir],
+   ['adminProvisiones', A, 0, a_adminProvisiones, 'nomina'], ['adminLiquidacionContrato', A, 1, a_adminLiquidacionContrato, 'nomina'], ['adminPrestamos', A, 0, a_adminPrestamos, 'prestamos'], ['adminPrestamoGuardar', A, 1, a_adminPrestamoGuardar, 'prestamos'], ['adminPrestamoAplicarCuota', A, 1, a_adminPrestamoAplicarCuota, 'prestamos'],
+   ['misCompensatorios', U, 0, a_misCompensatorios, 'nomina'], ['adminCompensatorioGuardar', A, 1, a_adminCompensatorioGuardar, 'nomina'], ['certificadoLaboral', U, 1, a_certificadoLaboral, 'autoservicio'], ['adminCertificadoLaboral', A, 1, a_adminCertificadoLaboral, 'autoservicio'],
    ['adminComunicadoCrear', A, 1, a_adminComunicadoCrear, 'autoservicio'], ['adminComunicados', A, 0, a_adminComunicados, 'autoservicio'], ['comunicadosMios', U, 0, a_comunicadosMios, 'autoservicio'], ['comunicadoLeer', U, 1, a_comunicadoLeer, 'autoservicio'],
    ['adminPresupuestoObras', A, 0, a_adminPresupuestoObras, 'presupuesto'], ['adminEnVivo', V, 0, a_adminEnVivo, 'tablero360'],
-   ['salirTodas', U, 1, a_salirTodas], ['adminVerificarAuditoria', A, 0, a_adminVerificarAuditoria, 'seguridadPro'],
+   ['salirTodas', U, 1, a_salirTodas], ['certificadoVerificar', P, 0, a_certificadoVerificar], ['adminVerificarAuditoria', A, 0, a_adminVerificarAuditoria, 'seguridadPro'],
    ['miProgramacion', U, 0, a_miProgramacion, 'turnos'], ['misPrestamos', U, 0, a_misPrestamos, 'prestamos'], ['misExtras', U, 0, a_misExtras, 'nomina'], ['incapacidadReportar', U, 1, a_incapacidadReportar, 'permisos'], ['contactosEmergencia', U, 0, a_contactosEmergencia],
    ['adminExpediente360', V, 0, a_adminExpediente360, 'tablero360'], ['adminTablero360', V, 0, a_adminTablero360, 'tablero360'], ['adminLicenciaActivar', A, 1, a_adminLicenciaActivar]
   ].forEach(function (x) { accion_(x[0], x[1], !!x[2], x[3], x[4]); });
@@ -1593,9 +1737,11 @@ function a_recuperarCambiar(d) {
   if (!h || h !== hmac_('rec|' + ced + '|' + soloDigitos_(d.codigo))) throw E_('CODIGO', 'El código no coincide o ya venció. Pide uno nuevo.');
   if (claveDebil_(d.clave, ced)) throw E_('DATOS', 'Elige una contraseña de al menos 6 caracteres que no sea tu cédula ni una secuencia fácil.');
   var u = buscar('Usuarios', 'cedula', ced); if (!u || u.estado === 'inactivo') throw E_('PERMISO', 'Tu usuario no está activo.');
-  u.salt = azar_().substr(0, 16); u.hash = hashClave_(String(d.clave), u.salt); guardar('Usuarios', u);
+  u.salt = azar_().substr(0, 16); u.hash = hashClaveV2_(String(d.clave), u.salt); guardar('Usuarios', u);
   c.remove('rec:' + ced); cerrarSesiones_(ced); auditar_(ced, 'clave_recuperada', '');
-  return { token: crearSesion_(ced, d.equipo), usuario: usuarioPublico_(u) };
+  if (u.rol !== 'trabajador') alertar_('seguridad', ced, 'Recuperó la contraseña de una cuenta de ' + u.rol + ' por correo. Si no fue esa persona, desactívala de inmediato.');
+  // No entrega sesión: se ingresa con la clave nueva, pasando por celular vinculado y código por correo.
+  return { listo: true };
 }
 
 /* ---------- Turnos y programación por fechas ---------- */
@@ -1719,67 +1865,164 @@ function a_miResumen(d, u) {
  */
 
 /* ---------- 1. Modo Kiosco (tablet compartida en portería/obra) ---------- */
-function a_kioscoMarcar(d, sup) {
+// La tablet usa una sesión propia de kiosco (ver a_kioscoIniciar): solo puede marcar, en un único centro.
+function a_kioscoMarcar(d, k) {
   var ced = soloDigitos_(d.cedula); if (ced.length < 5) throw E_('DATOS', 'Escribe la cédula.');
-  bloqueado_('kio:' + ced, 8);
+  bloqueado_('kio:' + ced, 8); bloqueado_('kt:' + k.cedula + k._kiosco, 40); // por cédula y por tablet
   var u = buscar('Usuarios', 'cedula', ced);
-  if (!u || !u.hash || !verificarClave_(String(d.clave || ''), u.salt, u.hash)) {
-    fallo_('kio:' + ced, 600);
-    throw E_('CREDENCIALES', 'Cédula o contraseña incorrecta.');
+  // Mismo error para cédula ajena, de otro rol o clave mala: el kiosco no sirve para adivinar contraseñas.
+  var valido = u && u.hash && u.rol === 'trabajador' && u.estado === 'activo' && u.centroId === k._kiosco && verificarClave_(String(d.clave || ''), u.salt, u.hash);
+  if (!valido) {
+    fallo_('kio:' + ced, 900); fallo_('kt:' + k.cedula + k._kiosco, 900);
+    if (fallo_('login', 600) === 30) alertar_('seguridad', '', 'Hubo 30 intentos fallidos en 10 minutos (ingreso o kiosco). Puede ser un intento de adivinar contraseñas.');
+    throw E_('CREDENCIALES', 'Cédula o contraseña incorrecta, o la persona no marca en este centro.');
   }
-  if (u.estado !== 'activo') throw E_('PERMISO', 'Usuario inactivo o pendiente.');
-  if (!enAlcance_(sup, u.cedula)) throw E_('PERMISO', 'Esta persona no pertenece a tu centro.');
-  var res = a_marcar({
-    tipo: d.tipo, lat: d.lat, lng: d.lng, prec: d.prec, centroId: d.centroId || u.centroId,
-    foto: d.foto, qrCodigo: d.qrCodigo, id: d.id
-  }, u);
-  auditar_(sup.cedula, 'kiosco_marcacion', { cedula: u.cedula, tipo: d.tipo });
-  return { usuario: u.nombre, resultado: res };
+  var res;
+  _marcaKiosco = true;
+  try { res = a_marcar({ tipo: d.tipo, lat: d.lat, lng: d.lng, prec: d.prec, centroId: k._kiosco, foto: d.foto, id: d.id }, u); }
+  finally { _marcaKiosco = false; }
+  auditar_(k.cedula, 'kiosco_marcacion', { cedula: u.cedula, tipo: d.tipo, centro: k._kiosco });
+  return { usuario: u.nombre.split(' ')[0], resultado: { hora: res.hora, repetida: !!res.repetida } };
+}
+function a_kioscoSalir(d, k, req) {
+  if (!k._kiosco) throw E_('PERMISO', 'Esta acción es solo para tablets en modo kiosco.');
+  var ced = soloDigitos_(d.cedula); bloqueado_('kio:' + ced, 8); // el bloqueo de la tablet no impide que el supervisor la apague
+  var s = buscar('Usuarios', 'cedula', ced), al = s ? alcance_(s) : null;
+  var ok = s && s.hash && s.estado === 'activo' && ['admin', 'supervisor'].indexOf(s.rol) >= 0 && (!al || al[k._kiosco]) && verificarClave_(String(d.clave || ''), s.salt, s.hash);
+  if (!ok) { fallo_('kio:' + ced, 900); fallo_('kt:' + k.cedula + k._kiosco, 900); throw E_('CREDENCIALES', 'Solo un supervisor de este centro o un administrador puede apagar el kiosco.'); }
+  cerrarSesiones_(k.cedula, sha_(String(req.t))); auditar_(ced, 'kiosco_apagado', { centro: k._kiosco });
+  return { ok: true };
+}
+function a_kioscoIniciar(d, sup) {
+  var c = centroDe_(txt_(d.centroId, 20)); if (!c || !c.activo) throw E_('DATOS', 'Elige el centro donde queda la tablet.');
+  var al = alcance_(sup); if (al && !al[c.id]) throw E_('PERMISO', 'Ese centro no está a tu cargo.');
+  auditar_(sup.cedula, 'kiosco_activado', { centro: c.id });
+  return { token: crearSesion_(sup.cedula, 'KIOSCO|' + c.id, 'kiosco'), centro: c.nombre };
 }
 
 /* ---------- 2. Provisiones de prestaciones sociales (Colombia) ---------- */
+// Provisiones de prestaciones y aportes del empleador del periodo. Estimado para presupuesto, no reemplaza la PILA.
+function costoEmpleador_(liq, L, c, arlCentro) {
+  var val = function (cods) { return (liq.conceptos || []).filter(function (k) { return cods.indexOf(k.cod) >= 0; }).reduce(function (s, k) { return s + (+k.valor || 0); }, 0); };
+  var noSal = val(['BNS']), aux = val(['AUX']), extras = val(COD_EXTRAS), domFest = val(['DF', 'DFN']);
+  var basePrest = Math.max(0, liq.devengado - noSal);              // salario + auxilio, sin pagos no salariales (art. 128)
+  var baseVac = Math.max(0, liq.devengado - noSal - aux - extras - domFest); // sin auxilio, extras ni trabajo en descansos (art. 192)
+  var p = { prima: Math.round(basePrest / 12), cesantias: Math.round(basePrest / 12), vacaciones: Math.round(baseVac * 15 / 360) };
+  p.intereses = Math.round(p.cesantias * 0.12);
+  var cant = function (cod) { return ((liq.conceptos || []).filter(function (k) { return k.cod === cod; })[0] || {}).cantidad || 0; };
+  var ibc = +liq.ibc || 0, dn = +liq.diasNomina || 30, diasArl = Math.min(dn, cant('SAL') + cant('DR')); // incapacidad y vacaciones no causan ARL
+  var exon = c.exoneradoAportes && (liq.devengado - aux) < 10 * L.smmlv * dn / 30; // ET art. 114-1: sobre lo devengado
+  var a = { pension: Math.round(ibc * 0.12), salud: exon ? 0 : Math.round(ibc * 0.085), arl: Math.round(ibc * (dn ? diasArl / dn : 1) * (+arlCentro || +c.arlPct || 0.522) / 100), caja: Math.round(ibc * 0.04), sena: exon ? 0 : Math.round(ibc * 0.02), icbf: exon ? 0 : Math.round(ibc * 0.03) };
+  p.totalProvisiones = p.prima + p.cesantias + p.intereses + p.vacaciones;
+  a.total = a.pension + a.salud + a.arl + a.caja + a.sena + a.icbf;
+  return { p: p, a: a, costo: liq.devengado + p.totalProvisiones + a.total };
+}
 function a_adminProvisiones(d) {
-  var r = rango_(d, 62), corte = r.hasta < r.hoy ? r.hasta : r.hoy;
-  var previa = a_adminNominaPrevia({ desde: r.desde, hasta: r.hasta });
-  var total = { devengado: 0, prima: 0, cesantias: 0, intereses: 0, vacaciones: 0, totalProvisiones: 0, costoTotal: 0 };
+  var r = rango_(d, 62), corte = r.hasta < r.hoy ? r.hasta : r.hoy, L = legal_(), c = cfg_();
+  var previa = a_adminNominaPrevia({ desde: r.desde, hasta: r.hasta }), arl = {};
+  leer('Centros').forEach(function (cc) { if (+cc.arlPct > 0) arl[cc.id] = +cc.arlPct; });
+  var total = { devengado: 0, prima: 0, cesantias: 0, intereses: 0, vacaciones: 0, totalProvisiones: 0, aportes: 0, costoTotal: 0 };
   var filas = previa.filas.map(function (x) {
-    var basePrest = x.liq.devengado; // incluye auxilio de transporte para prima y cesantías
-    var baseVac = Math.max(0, x.liq.devengado - ((x.liq.conceptos.filter(function (k) { return k.cod === 'AUX'; })[0] || {}).valor || 0));
-    var prima = Math.round(basePrest * 0.083333);
-    var cesantias = Math.round(basePrest * 0.083333);
-    var intereses = Math.round(cesantias * 0.12);
-    var vacaciones = Math.round(baseVac * 0.041667);
-    var totP = prima + cesantias + intereses + vacaciones;
-    total.devengado += x.liq.devengado; total.prima += prima; total.cesantias += cesantias;
-    total.intereses += intereses; total.vacaciones += vacaciones; total.totalProvisiones += totP; total.costoTotal += x.liq.devengado + totP;
-    return { cedula: x.cedula, nombre: x.nombre, centro: x.centro, devengado: x.liq.devengado, prima: prima, cesantias: cesantias, intereses: intereses, vacaciones: vacaciones, totalProvisiones: totP, costoTotal: x.liq.devengado + totP };
+    var k = costoEmpleador_(x.liq, L, c, arl[x.centroId]);
+    total.devengado += x.liq.devengado; total.prima += k.p.prima; total.cesantias += k.p.cesantias; total.intereses += k.p.intereses; total.vacaciones += k.p.vacaciones;
+    total.totalProvisiones += k.p.totalProvisiones; total.aportes += k.a.total; total.costoTotal += k.costo;
+    return { cedula: x.cedula, nombre: x.nombre, centro: x.centro, centroId: x.centroId, devengado: x.liq.devengado, prima: k.p.prima, cesantias: k.p.cesantias, intereses: k.p.intereses, vacaciones: k.p.vacaciones,
+      totalProvisiones: k.p.totalProvisiones, aportes: k.a.total, aportesDet: k.a, costoTotal: k.costo };
   });
-  return { desde: r.desde, hasta: r.hasta, corte: corte, filas: filas, total: total };
+  return { desde: r.desde, hasta: r.hasta, corte: corte, filas: filas, total: total, arlPct: +c.arlPct || 0.522, exonerado: !!c.exoneradoAportes };
 }
 
 /* ---------- 5. Simulador de liquidación de contrato ---------- */
-function a_adminLiquidacionContrato(d) {
+// Liquidación final del contrato (estimada, para revisión del contador). Meses de 30 días (CST arts. 249 y 306, Ley 52 de 1975).
+var COD_EXTRAS = ['HED', 'HEN', 'HEDF', 'HENF'], COD_NO_SALARIO = ['BNS', 'AUS', 'PNR', 'PNH', 'DNC', 'AUX'];
+function promedioNominas_(ced, desde, hasta, excluir) {
+  var suma = 0, dias = 0;
+  leer('Nomina').forEach(function (n) {
+    if (n.cedula !== ced || n.hasta < desde || n.desde > hasta) return; var det = json_(n.detalle, {}), dn = +det.diasNomina || 0; if (!dn) return;
+    dias += dn; (det.conceptos || []).forEach(function (k) { if (excluir.indexOf(k.cod) < 0 && +k.valor > 0) suma += +k.valor; });
+  });
+  return { mensual: dias ? Math.round(suma * 30 / dias) : 0, dias: dias };
+}
+function diasNoRemunerados_(ced, desde, hasta) { // licencias no remuneradas y suspensiones no cuentan para prestaciones (CST art. 51)
+  var n = 0; leer('Permisos').forEach(function (p) {
+    if (p.cedula !== ced || p.estado !== 'aprobado' || p.remunerado === '1') return;
+    var a = p.fechaSalida > desde ? p.fechaSalida : desde, b0 = p.fechaSalida === p.fechaRegreso ? p.fechaSalida : Motor.sumar(p.fechaRegreso, -1), b = b0 < hasta ? b0 : hasta;
+    if (a <= b && !(p.horaSalida && p.fechaSalida === p.fechaRegreso)) n += Motor.diasNomina(a, b);
+  });
+  return n;
+}
+var CAUSAS_RETIRO = { renuncia: 'Renuncia voluntaria', justa_causa: 'Despido con justa causa', sin_justa_causa: 'Despido sin justa causa', mutuo_acuerdo: 'Mutuo acuerdo', fin_plazo: 'Vencimiento del plazo pactado (con preaviso)', fin_obra: 'Terminación de la obra o labor' };
+function a_adminLiquidacionContrato(d, adm) {
   var u = buscar('Usuarios', 'cedula', soloDigitos_(d.cedula));
   if (!u) throw E_('DATOS', 'No se encontró la persona.');
   var L = legal_(), retiro = /^\d{4}-\d\d-\d\d$/.test(d.fechaRetiro || '') ? d.fechaRetiro : (u.retiro || ahora_().fecha);
-  var ingreso = String(u.ingreso || '').substr(0, 10);
+  var ingreso = String(u.ingreso || '').substr(0, 10), causa = CAUSAS_RETIRO[d.causa] ? d.causa : 'renuncia', tipo = u.tipoContrato || 'indefinido';
   if (!/^\d{4}-\d\d-\d\d$/.test(ingreso) || retiro < ingreso) throw E_('DATOS', 'Verifica la fecha de ingreso y la fecha de retiro.');
-  var sal = +u.salario || 0, aux = sal <= L.smmlv * L.topeAuxSmmlv ? L.auxTransporte : 0, basePrest = sal + aux;
+  var sal = (+u.salario || 0) * (u.tipoPago === 'dia' ? 30 : 1), aux = sal <= L.smmlv * L.topeAuxSmmlv ? L.auxTransporte : 0, avisos = []; // jornal → salario mensual equivalente
   var anio = retiro.substr(0, 4), iniAnio = anio + '-01-01', iniSem = retiro.substr(5, 2) >= '07' ? anio + '-07-01' : iniAnio;
-  var diasAnio = Math.max(1, Motor.diasEntre(ingreso > iniAnio ? ingreso : iniAnio, retiro) + 1);
-  var diasSem = Math.max(1, Motor.diasEntre(ingreso > iniSem ? ingreso : iniSem, retiro) + 1);
-  var cesantias = Math.round((basePrest * diasAnio) / 360);
-  var intereses = Math.round((cesantias * diasAnio * 0.12) / 360);
-  var prima = Math.round((basePrest * diasSem) / 360);
-  var causadas = Motor.vacacionesCausadas(ingreso, retiro), tomadas = 0;
-  leer('Permisos').forEach(function (p) { if (p.cedula === u.cedula && p.tipo === 'vacaciones' && p.estado === 'aprobado') tomadas += Motor.diasHabiles(p.fechaSalida, Motor.sumar(p.fechaRegreso, -1), L, false); });
-  var diasVacPend = Math.max(0, Math.round((causadas - tomadas) * 10) / 10);
-  var vacaciones = Math.round((sal / 30) * diasVacPend);
-  var saldoPrestamos = 0;
-  leer('Prestamos').forEach(function (p) { if (p.cedula === u.cedula && p.estado === 'activo') saldoPrestamos += +p.saldo || 0; });
-  var total = cesantias + intereses + prima + vacaciones - saldoPrestamos;
-  return { cedula: u.cedula, nombre: u.nombre, ingreso: ingreso, retiro: retiro, salario: sal, auxTransporte: aux, diasAnio: diasAnio, diasSemestre: diasSem,
-    cesantias: cesantias, interesesCesantias: intereses, prima: prima, diasVacacionesPendientes: diasVacPend, vacaciones: vacaciones, descuentoPrestamos: saldoPrestamos, totalEstimado: total };
+  var dAnio = ingreso > iniAnio ? ingreso : iniAnio, dSem = ingreso > iniSem ? ingreso : iniSem;
+  var diasAnio = Math.max(0, Motor.diasNomina(dAnio, retiro) - diasNoRemunerados_(u.cedula, dAnio, retiro));
+  var diasSem = Math.max(0, Motor.diasNomina(dSem, retiro) - diasNoRemunerados_(u.cedula, dSem, retiro));
+  // Bases: salario fijo = básico + auxilio; variable = promedio (último año para cesantías, semestre para prima; art. 253 y 306)
+  var fija = sal + aux, pAnio = promedioNominas_(u.cedula, Motor.sumar(retiro, -365), retiro, ['BNS', 'AUS', 'PNR', 'PNH', 'DNC']);
+  var pSem = promedioNominas_(u.cedula, dSem, retiro, ['BNS', 'AUS', 'PNR', 'PNH', 'DNC']);
+  var baseCes = pAnio.dias >= 30 && pAnio.mensual > fija ? pAnio.mensual : fija, basePrima = pSem.dias >= 30 && pSem.mensual > fija ? pSem.mensual : fija;
+  var cesantias = Math.round(baseCes * diasAnio / 360), intereses = Math.round(cesantias * diasAnio * 0.12 / 360), prima = Math.round(basePrima * diasSem / 360);
+  // Vacaciones: 15 días hábiles por 360 días; base sin horas extra ni auxilio (art. 192)
+  var pVac = promedioNominas_(u.cedula, Motor.sumar(retiro, -365), retiro, COD_EXTRAS.concat(COD_NO_SALARIO, ['DF', 'DFN'])), baseVac = pVac.dias >= 30 && pVac.mensual > sal ? pVac.mensual : sal;
+  var diasServ = Math.max(0, Motor.diasNomina(ingreso, retiro) - diasNoRemunerados_(u.cedula, ingreso, retiro)), causadas = Math.round(diasServ * 15 / 360 * 10) / 10, tomadas = 0;
+  leer('Permisos').forEach(function (p) { if (p.cedula === u.cedula && p.tipo === 'vacaciones' && p.estado === 'aprobado') tomadas += Motor.diasHabiles(p.fechaSalida, Motor.sumar(p.fechaRegreso, -1), L, sabadoHabil_(p.cedula)); });
+  var diasVacPend = Math.max(0, Math.round((causadas - tomadas) * 10) / 10), vacaciones = Math.round(baseVac / 30 * diasVacPend);
+  // Indemnización por despido sin justa causa (CST art. 64)
+  var indem = 0, indemDet = '';
+  if (causa === 'sin_justa_causa') {
+    var vDia = Math.max(sal, baseVac) / 30;
+    if (tipo === 'fijo' && /^\d{4}-\d\d-\d\d$/.test(u.finContrato || '') && u.finContrato > retiro) { var falta = Motor.diasNomina(Motor.sumar(retiro, 1), u.finContrato); indem = Math.round(vDia * falta); indemDet = 'Salarios del tiempo que faltaba del contrato a término fijo: ' + falta + ' días.'; }
+    else if (tipo === 'obra') { indem = Math.round(vDia * 15); indemDet = 'Contrato por obra o labor: mínimo 15 días (ajusta al tiempo que faltaba para terminar la obra si es mayor).'; avisos.push('Revisa cuánto faltaba para terminar la obra: la indemnización es ese tiempo, con mínimo 15 días.'); }
+    else {
+      var anios = diasServ / 360, alto = sal >= 10 * L.smmlv, primero = alto ? 20 : 30, adic = alto ? 15 : 20;
+      var dIndem = anios <= 1 ? primero : primero + adic * (anios - 1); indem = Math.round(vDia * dIndem);
+      indemDet = (alto ? 'Salario de 10 SMMLV o más: 20 días el primer año y 15 por año adicional' : 'Salario menor a 10 SMMLV: 30 días el primer año y 20 por año adicional') + ' (proporcional): ' + Math.round(dIndem * 10) / 10 + ' días.';
+      if (tipo === 'fijo') avisos.push('La persona tiene contrato a término fijo pero sin fecha de terminación registrada: se calculó como indefinido. Registra la fecha en Personal → Editar.');
+    }
+  }
+  if (causa === 'fin_plazo') avisos.push('Si no se dio preaviso de 30 días, el contrato a término fijo se prorrogó y debe liquidarse como despido sin justa causa.');
+  // Salario del último periodo, si aún no se ha pagado en una nómina cerrada
+  var salarioPendiente = 0, per = Motor.periodoDe(retiro, cfg_().periodoNomina);
+  if (!periodoCerrado_(retiro)) {
+    var uRet = {}; for (var k in u) uRet[k] = u[k]; uRet.retiro = retiro;
+    var liqP = Motor.liquidarPeriodo(insumos_(uRet, per.desde, retiro, retiro, leer('Marcaciones')), L); salarioPendiente = Math.max(0, liqP.neto);
+  }
+  if (+retiro.substr(5, 2) <= 2 && retiro.substr(5, 5) < '02-15') avisos.push('Retiro antes del 15 de febrero: si las cesantías de ' + (+anio - 1) + ' no se consignaron al fondo a tiempo, se deben pagar directamente con la sanción de la Ley 50 de 1990 (art. 99).');
+  avisos.push('Pagar todo el día del retiro. Si se paga tarde sin razón, se causa un día de salario por cada día de retraso (CST art. 65).');
+  var saldoPrestamos = 0; leer('Prestamos').forEach(function (p) { if (p.cedula === u.cedula && p.estado === 'activo') saldoPrestamos += +p.saldo || 0; });
+  if (/^\d{4}-\d\d-\d\d$/.test(d.primaPagadaHasta || '') && d.primaPagadaHasta >= dSem) { // solo se liquida la prima después de lo ya pagado
+    var dPri = d.primaPagadaHasta >= retiro ? 0 : Math.max(0, Motor.diasNomina(Motor.sumar(d.primaPagadaHasta, 1), retiro) - diasNoRemunerados_(u.cedula, Motor.sumar(d.primaPagadaHasta, 1), retiro));
+    prima = Math.round(basePrima * dPri / 360); diasSem = dPri; avisos.push('Prima pagada hasta el ' + d.primaPagadaHasta + ': se liquidan ' + dPri + ' días.'); }
+  if (retiro.substr(5, 2) === '01') avisos.push('Retiro en enero: verifica que los intereses de las cesantías de ' + (+anio - 1) + ' se hayan pagado antes del 31 de enero (Ley 52 de 1975).');
+  var total = salarioPendiente + cesantias + intereses + prima + vacaciones + indem;
+  // Solo préstamos con autorización firmada, y nunca de las cesantías ni de más de la mitad del salario pendiente (CST arts. 149 y 250)
+  var saldoAut = 0; leer('Prestamos').forEach(function (p) { if (p.cedula === u.cedula && p.estado === 'activo' && p.autorizacion) saldoAut += +p.saldo || 0; });
+  var descontable = Math.floor(salarioPendiente * 0.5) + prima + vacaciones + indem;
+  var desc = d.autorizaDescuento ? Math.min(saldoAut, descontable) : 0;
+  if (desc < saldoAut && d.autorizaDescuento) avisos.push('Quedan ' + saldoAut + ' − ' + desc + ' de préstamo sin descontar: las cesantías y la mitad del salario no se pueden retener. Acuerda el pago del saldo con el trabajador.');
+  var r = { cedula: u.cedula, nombre: u.nombre, cargo: u.cargo, ingreso: ingreso, retiro: retiro, causa: causa, causaTexto: CAUSAS_RETIRO[causa], tipoContrato: tipo, salario: sal, auxTransporte: aux,
+    diasAnio: diasAnio, diasSemestre: diasSem, diasServicio: diasServ, baseCesantias: baseCes, basePrima: basePrima, baseVacaciones: baseVac,
+    basePrestaciones: baseCes, baseFuente: baseCes > fija ? 'promedio del último año (' + pAnio.dias + ' días liquidados)' : 'salario básico + auxilio',
+    salarioPendiente: salarioPendiente, periodoPendiente: periodoCerrado_(retiro) ? '' : per.desde + ' a ' + retiro,
+    cesantias: cesantias, interesesCesantias: intereses, prima: prima, diasVacacionesPendientes: diasVacPend, vacaciones: vacaciones,
+    indemnizacion: indem, indemnizacionDetalle: indemDet, saldoPrestamos: saldoPrestamos, descuentoPrestamos: desc, totalEstimado: total - desc, avisos: avisos,
+    empresa: cfg_().empresa };
+  if (d.guardar && adm) {
+    if (retiro > ahora_().fecha) throw E_('DATOS', 'Solo se registra la liquidación con la fecha de retiro real (hoy o antes). Para fechas futuras usa «Calcular».');
+    if (leer('Liquidaciones').some(function (x) { return x.cedula === u.cedula; })) throw E_('DATOS', 'Esta persona ya tiene una liquidación registrada. Consulta la hoja Liquidaciones.');
+    var resta = desc; // el saldo descontado en la liquidación cierra los préstamos
+    leer('Prestamos').forEach(function (p) { if (resta <= 0 || p.cedula !== u.cedula || p.estado !== 'activo') return; var v = Math.min(resta, +p.saldo); p.saldo = String(+p.saldo - v); resta -= v; if (+p.saldo <= 0) p.estado = 'pagado'; guardar('Prestamos', p); });
+    var uu = buscar('Usuarios', 'cedula', u.cedula); uu.liquidado = retiro; uu.retiro = retiro; uu.estado = 'inactivo'; guardar('Usuarios', uu); cerrarSesiones_(uu.cedula); // la nómina del periodo ya no lo vuelve a pagar
+    r.id = id_(); agregar('Liquidaciones', { id: r.id, cedula: u.cedula, nombre: u.nombre, retiro: retiro, causa: causa, total: String(r.totalEstimado), detalle: JSON.stringify(r), registradoPor: adm.cedula, creado: ahora_().iso });
+    auditar_(adm.cedula, 'liquidacion_contrato', { id: r.id, cedula: u.cedula, retiro: retiro, causa: causa, total: r.totalEstimado, indemnizacion: indem, descuentoPrestamos: desc });
+  }
+  return r;
 }
 
 /* ---------- 6. Préstamos y adelantos con cuotas ---------- */
@@ -1792,57 +2035,89 @@ function a_adminPrestamos() {
 function a_adminPrestamoGuardar(d, adm) {
   var ced = soloDigitos_(d.cedula), u = buscar('Usuarios', 'cedula', ced);
   if (!u) throw E_('DATOS', 'No se encontró la persona.');
+  if (u.estado !== 'activo' || u.liquidado) throw E_('DATOS', 'Solo se registran préstamos a personas activas.');
   var monto = Math.round(+d.monto || 0), cuotas = Math.max(1, Math.min(60, Math.round(+d.cuotas || 1)));
   if (monto <= 0) throw E_('DATOS', 'El monto debe ser mayor a cero.');
+  // CST arts. 59 y 149: sin autorización escrita del trabajador no se puede descontar del salario.
+  if (!d.autorizacion) throw E_('DATOS', 'Adjunta la foto de la autorización de descuento firmada por el trabajador.');
   var fila = {
     id: id_(), cedula: ced, concepto: txt_(d.concepto, 80) || 'Préstamo / adelanto',
     monto: String(monto), cuotas: String(cuotas), cuotaValor: String(Math.round(monto / cuotas)),
-    pagadas: '0', saldo: String(monto), estado: 'activo', creadoPor: adm.cedula, creado: ahora_().iso
+    pagadas: '0', saldo: String(monto), estado: 'activo', creadoPor: adm.cedula, creado: ahora_().iso, autorizacion: '', ultimoPeriodo: ''
   };
+  fila.autorizacion = guardarImagen_(d.autorizacion, 'autorizacion_prestamo_' + ced + '_' + fila.id + '.jpg', 'CARPETA_FOTOS');
   agregar('Prestamos', fila);
   auditar_(adm.cedula, 'prestamo_creado', { id: fila.id, cedula: ced, monto: monto, cuotas: cuotas });
   return { id: fila.id };
 }
-function a_adminPrestamoAplicarCuota(d, adm) {
-  var p = buscar('Prestamos', 'id', txt_(d.id, 40));
-  if (!p || p.estado !== 'activo') throw E_('DATOS', 'Préstamo no encontrado o ya saldado.');
-  var fecha = /^\d{4}-\d\d-\d\d$/.test(d.fecha || '') ? d.fecha : ahora_().fecha;
-  if (periodoCerrado_(fecha)) throw E_('CERRADO', 'La fecha pertenece a una nómina cerrada.');
-  var valor = Math.min(+p.saldo, Math.round(+d.valor || +p.cuotaValor));
-  agregar('Novedades', { id: id_(), cedula: p.cedula, fecha: fecha, concepto: 'Cuota: ' + p.concepto, valor: String(-valor), salarial: '', nota: 'Cuota ' + (+p.pagadas + 1) + '/' + p.cuotas, creadoPor: adm.cedula, creado: ahora_().iso });
-  p.pagadas = String(+p.pagadas + 1);
-  p.saldo = String(Math.max(0, +p.saldo - valor));
-  if (+p.saldo <= 0) p.estado = 'pagado';
-  guardar('Prestamos', p);
-  auditar_(adm.cedula, 'prestamo_cuota', { id: p.id, cedula: p.cedula, valor: valor, saldo: +p.saldo });
-  return { saldo: +p.saldo, estado: p.estado };
+// Las cuotas se descuentan solas al cerrar la nómina (una por préstamo y periodo, con tope). No hay descuento manual.
+function a_adminPrestamoAplicarCuota() { throw E_('DATOS', 'Las cuotas se descuentan automáticamente al cerrar la nómina, con el tope legal. No se aplican a mano.'); }
+// Cuánto se puede descontar a alguien en el periodo sin dejarlo por debajo del mínimo ni pasar del 50 % del neto.
+function topeDescuento_(liq, L) {
+  var cant = function (cod) { return ((liq.conceptos || []).filter(function (k) { return k.cod === cod; })[0] || {}).cantidad || 0; };
+  var val = function (cod) { return ((liq.conceptos || []).filter(function (k) { return k.cod === cod; })[0] || {}).valor || 0; };
+  var pagados = Math.max(0, cant('SAL') + cant('DR') - cant('AUS') - cant('PNR')), neto = +liq.neto || 0;
+  // El mínimo vital de los días pagados no se toca (CST arts. 59, 149 y 154) y nunca más del 50 % del neto (criterio de la Ley 1527 de 2012)
+  var piso = (L.smmlv / 30) * pagados * (1 - L.pctSalud - L.pctPension);
+  return Math.max(0, Math.floor(Math.min(neto * 0.5, neto - val('AUX') - piso)));
+}
+function aplicarCuotasPrestamos_(r, filas, adm) {
+  var L = legal_(), porCed = {}, tocados = {}; filas.forEach(function (x) { porCed[x.cedula] = x; });
+  leer('Prestamos').filter(function (p) { return p.estado === 'activo' && +p.saldo > 0 && p.autorizacion; }).forEach(function (p) {
+    var x = porCed[p.cedula], clave = r.desde + '|' + r.hasta; if (!x || p.ultimoPeriodo === clave) return; // sin liquidación en este cierre: no se descuenta
+    var disp = topeDescuento_(x.liq, L) - (tocados[p.cedula] || 0), valor = Math.max(0, Math.min(+p.saldo, +p.cuotaValor, disp));
+    p.ultimoPeriodo = clave;
+    if (valor > 0) {
+      tocados[p.cedula] = (tocados[p.cedula] || 0) + valor;
+      agregar('Novedades', { id: id_(), cedula: p.cedula, fecha: r.hasta, concepto: 'Cuota: ' + p.concepto, valor: String(-valor), salarial: '', nota: 'Préstamo ' + p.id + ' · cuota ' + (+p.pagadas + 1) + (valor < +p.cuotaValor ? ' (reducida por el tope legal)' : ''), creadoPor: adm.cedula, creado: ahora_().iso });
+      p.pagadas = String(+p.pagadas + 1); p.saldo = String(Math.max(0, +p.saldo - valor)); if (+p.saldo <= 0) p.estado = 'pagado';
+      auditar_(adm.cedula, 'prestamo_cuota', { id: p.id, cedula: p.cedula, valor: valor, saldo: +p.saldo });
+    } else alertar_('nomina', p.cedula, 'No se descontó la cuota del préstamo "' + p.concepto + '" en el periodo ' + clave + ': el neto no alcanza sin bajar del mínimo legal.');
+    guardar('Prestamos', p);
+  });
+  return Object.keys(tocados);
 }
 
 /* ---------- 7. Banco de horas / compensatorios ---------- */
+function saldoCompensatorio_(ced) { return leer('Compensatorios').filter(function (x) { return x.cedula === ced; }).reduce(function (s, x) { return s + (+x.minutos || 0); }, 0); }
 function a_misCompensatorios(d, u) {
   var lista = leer('Compensatorios').filter(function (x) { return x.cedula === u.cedula; });
   var saldoMin = lista.reduce(function (s, x) { return s + (+x.minutos || 0); }, 0);
   return { saldoMin: saldoMin, saldoHoras: Math.round(saldoMin / 6) / 10, movimientos: lista.reverse().slice(0, 60) };
 }
+// Disfrute = día (o parte del día) de descanso pagado: la nómina lo trata como permiso remunerado, no como ausencia.
 function a_adminCompensatorioGuardar(d, adm) {
   var ced = soloDigitos_(d.cedula); if (!buscar('Usuarios', 'cedula', ced)) throw E_('DATOS', 'No se encontró la persona.');
   var min = Math.round(+d.minutos || 0); if (!min) throw E_('DATOS', 'Indica los minutos (positivos para abonar, negativos para disfrutar).');
-  var fila = { id: id_(), cedula: ced, fecha: /^\d{4}-\d\d-\d\d$/.test(d.fecha || '') ? d.fecha : ahora_().fecha, minutos: String(min), tipo: min > 0 ? 'abono' : 'disfrute', motivo: txt_(d.motivo, 160), creadoPor: adm.cedula, creado: ahora_().iso };
+  var fecha = /^\d{4}-\d\d-\d\d$/.test(d.fecha || '') ? d.fecha : ahora_().fecha;
+  if (periodoCerrado_(fecha)) throw E_('CERRADO', 'Esa fecha pertenece a una nómina cerrada.');
+  if (min < 0 && saldoCompensatorio_(ced) + min < 0) throw E_('DATOS', 'El saldo no alcanza: tiene ' + (Math.round(saldoCompensatorio_(ced) / 6) / 10) + ' h a favor.');
+  if (min > 0 && (txt_(d.motivo, 160).length < 5 || !d.soporte)) throw E_('DATOS', 'Para abonar horas escribe el origen y adjunta la foto del acuerdo firmado con el trabajador.');
+  var fila = { id: id_(), cedula: ced, fecha: fecha, minutos: String(min), tipo: min > 0 ? 'abono' : 'disfrute', motivo: txt_(d.motivo, 160), creadoPor: adm.cedula, creado: ahora_().iso, soporte: '' };
+  if (d.soporte) fila.soporte = guardarImagen_(d.soporte, 'acuerdo_compensatorio_' + ced + '_' + fila.id + '.jpg', 'CARPETA_FOTOS');
   agregar('Compensatorios', fila);
-  auditar_(adm.cedula, 'compensatorio', { cedula: ced, minutos: min });
+  auditar_(adm.cedula, 'compensatorio', { cedula: ced, minutos: min, fecha: fecha });
   return { id: fila.id };
 }
 
 /* ---------- 8. Certificado laboral en 1 clic ---------- */
-function a_certificadoLaboral(d, u) {
-  var c = cfg_(), a = ahora_(), conSalario = !!d.conSalario;
-  var codVerif = hmac_('cert|' + u.cedula + '|' + a.fecha).substr(0, 10).toUpperCase();
-  auditar_(u.cedula, 'certificado_laboral', { conSalario: conSalario, codigo: codVerif });
-  return {
-    empresa: c.empresa.nombre, nit: c.empresa.nit, direccion: c.empresa.direccion, telefono: c.empresa.telefono,
-    fecha: a.fecha, codigoVerificacion: codVerif,
-    empleado: { nombre: u.nombre, cedula: u.cedula, cargo: u.cargo || 'Colaborador', ingreso: String(u.ingreso || '').substr(0, 10), tipoContrato: u.tipoContrato || 'laboral', salario: conSalario ? (+u.salario || 0) : null, estado: u.estado }
-  };
+// Cada certificado queda guardado tal como se emitió: la verificación pública muestra exactamente lo certificado.
+function emitirCertificado_(u, conSalario, emisor) {
+  var c = cfg_(), a = ahora_(), activo = u.estado === 'activo', cod = '';
+  do { cod = codigoLargo_() + codigoLargo_().substr(0, 2); } while (buscar('Certificados', 'codigo', cod));
+  var reg = { codigo: cod, cedula: u.cedula, fecha: a.fecha, nombre: u.nombre, cargo: u.cargo || 'Colaborador', ingreso: String(u.ingreso || '').substr(0, 10),
+    retiro: activo ? '' : String(u.retiro || '').substr(0, 10), tipoContrato: u.tipoContrato || '', salario: conSalario ? String(+u.salario || 0) : '', estado: activo ? 'vinculado' : 'retirado', emitidoPor: emisor, creado: a.iso, tipoPago: u.tipoPago === 'dia' ? 'dia' : 'mensual' };
+  agregar('Certificados', reg);
+  auditar_(emisor, 'certificado_laboral', { cedula: u.cedula, codigo: cod, conSalario: conSalario });
+  return { empresa: c.empresa.nombre, nit: c.empresa.nit, direccion: c.empresa.direccion, telefono: c.empresa.telefono,
+    fecha: a.fecha, codigoVerificacion: cod, verificarEn: (c.urlApp || '').replace(/[#?].*$/, '') + (c.urlApp ? '#/verificar' : ''),
+    empleado: { nombre: reg.nombre, cedula: u.cedula, cargo: reg.cargo, ingreso: reg.ingreso, retiro: reg.retiro, tipoContrato: reg.tipoContrato || 'laboral', salario: conSalario ? +reg.salario : null, salarioTipo: reg.tipoPago === 'dia' ? 'diario' : 'mensual', estado: reg.estado === 'vinculado' ? 'activo' : 'retirado' } };
+}
+function a_certificadoLaboral(d, u) { limite_('cert:' + u.cedula, 10, 86400); return emitirCertificado_(u, !!d.conSalario, u.cedula); }
+// RRHH lo emite para cualquier persona, también retirados (que ya no pueden entrar a la aplicación)
+function a_adminCertificadoLaboral(d, adm) {
+  var u = buscar('Usuarios', 'cedula', soloDigitos_(d.cedula)); if (!u || /^Exempleado /.test(u.nombre)) throw E_('DATOS', 'No se encontró la persona.');
+  return emitirCertificado_(u, !!d.conSalario, adm.cedula);
 }
 
 /* ---------- 9. Comunicados con confirmación de lectura ---------- */
@@ -1878,10 +2153,12 @@ function a_comunicadoLeer(d, u) {
 
 /* ---------- 10. Presupuesto por obra (horas y costo) ---------- */
 function a_adminPresupuestoObras(d) {
-  var res = a_adminResumenObra(d), cs = {};
+  var res = a_adminResumenObra(d), cs = {}, prov = a_adminProvisiones(d), carga = prov.total.devengado > 0 ? prov.total.costoTotal / prov.total.devengado : 1, porC = {};
+  prov.filas.forEach(function (x) { var k = x.centroId || '-'; porC[k] = porC[k] || { dev: 0, costo: 0 }; porC[k].dev += x.devengado; porC[k].costo += x.costoTotal; });
+  res.obras.forEach(function (o) { var p = porC[o.centroId], f = p && p.dev > 0 ? p.costo / p.dev : carga; o.costo = Math.round(o.costo * f); }); // costo real por obra: devengado + prestaciones + aportes (ARL de esa obra)
   centros_().forEach(function (c) { cs[c.id] = c; });
   return {
-    desde: res.desde, hasta: res.hasta,
+    desde: res.desde, hasta: res.hasta, factorCarga: Math.round(carga * 100) / 100,
     obras: res.obras.map(function (o) {
       var c = cs[o.centroId] || {};
       var pH = +(c.presupuestoHoras || 0), pC = +(c.presupuestoCosto || 0);
@@ -1972,19 +2249,21 @@ function a_adminExpediente360(d, adm) {
   if (!u) throw E_('DATOS', 'No se encontró la persona.');
   if (!enAlcance_(adm, u.cedula)) throw E_('PERMISO', 'Esta persona no pertenece a tu centro.');
   var a = ahora_(), marc = leer('Marcaciones', 15000), L = legal_();
-  var tom = 0; leer('Permisos').forEach(function (p) { if (p.cedula === u.cedula && p.tipo === 'vacaciones' && p.estado === 'aprobado') tom += Motor.diasHabiles(p.fechaSalida, Motor.sumar(p.fechaRegreso, -1), L, false); });
+  var tom = 0; leer('Permisos').forEach(function (p) { if (p.cedula === u.cedula && p.tipo === 'vacaciones' && p.estado === 'aprobado') tom += Motor.diasHabiles(p.fechaSalida, Motor.sumar(p.fechaRegreso, -1), L, sabadoHabil_(p.cedula)); });
   var ultNom = leer('Nomina').filter(function (n) { return n.cedula === u.cedula; }).slice(-1)[0] || null;
+  var pub = usuarioPublico_(u), esAdm = adm.rol === 'admin';
+  if (!esAdm) ['salario', 'banco', 'tipoCuenta', 'cuenta', 'eps', 'arl', 'email', 'telefono'].forEach(function (k) { delete pub[k]; }); // el supervisor no ve datos financieros ni de contacto
   return {
-    usuario: usuarioPublico_(u),
+    usuario: pub,
     hoy: estadoHoy_(u, marc),
     resumenPeriodo: resumen_(u, marc),
     programacion: a_miProgramacion({ dias: 14 }, u),
     vacaciones: { causadas: Motor.vacacionesCausadas(u.ingreso, a.fecha), tomadas: tom },
     compensatorios: a_misCompensatorios({}, u),
-    prestamos: a_misPrestamos({}, u),
+    prestamos: esAdm ? a_misPrestamos({}, u) : [],
     extras: a_misExtras({}, u).slice(0, 15),
     comunicadosPendientes: a_comunicadosMios({}, u).filter(function (c) { return !c.leidoEl; }).length,
-    ultimaNomina: ultNom ? { id: ultNom.id, desde: ultNom.desde, hasta: ultNom.hasta, neto: +ultNom.neto, acuse: ultNom.acuse || '' } : null
+    ultimaNomina: ultNom && esAdm ? { id: ultNom.id, desde: ultNom.desde, hasta: ultNom.hasta, neto: +ultNom.neto, acuse: ultNom.acuse || '' } : null
   };
 }
 function a_adminTablero360(d, adm) {
@@ -2011,13 +2290,29 @@ function a_adminTablero360(d, adm) {
 /* ---------- 14. Activación de licencia por plan y módulos ---------- */
 function a_adminLicenciaActivar(d, adm) {
   var raw = txt_(d.llave, 1000);
+  if (!CLAVE_LICENCIA_PROVEEDOR) throw E_('DATOS', 'Esta instalación no usa llaves de licencia: tiene todos los módulos.');
   if (!raw || raw.split('.').length !== 2) throw E_('DATOS', 'La llave de licencia no tiene un formato válido.');
-  var prev = prop_('LICENCIA');
-  prop_('LICENCIA', raw);
+  var prev = prop_('LICENCIA'), prevNit = prop_('LIC_NIT');
+  if (prevNit && soloDigitos_(prevNit) !== soloDigitos_(cfg_().empresa.nit)) throw E_('DATOS', 'El NIT de la empresa no coincide con el de la licencia activa (' + prevNit + ').');
+  prop_('LIC_NIT', cfg_().empresa.nit || ''); prop_('LICENCIA', raw);
   var lic = licenciaEfectiva_();
-  if (lic.vencida && CLAVE_LICENCIA_PROVEEDOR) { prop_('LICENCIA', prev || null); throw E_('DATOS', 'La llave de licencia es inválida o está vencida.'); }
+  if (lic.vencida) { prop_('LICENCIA', prev || null); prop_('LIC_NIT', prevNit || null); throw E_('DATOS', lic.motivo || 'La llave de licencia es inválida o está vencida.'); }
   auditar_(adm.cedula, 'licencia_activada', { plan: lic.plan, maxUsuarios: lic.maxUsuarios, vence: lic.vence });
   return lic;
+}
+
+/* El receptor de un certificado confirma que es auténtico con cédula, fecha y código (sin sesión). */
+function a_certificadoVerificar(d) {
+  var ced = soloDigitos_(d.cedula), f = /^\d{4}-\d\d-\d\d$/.test(d.fecha || '') ? d.fecha : '', cod = txt_(d.codigo, 20).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!ced || !f || cod.length !== 10) throw E_('DATOS', 'Escribe la cédula, la fecha del certificado y el código de 10 caracteres.');
+  var r = buscar('Certificados', 'codigo', cod), ok = !!(r && r.cedula === ced && r.fecha === f);
+  if (!ok) { // solo se limitan los fallos, por cédula+código: un certificado auténtico siempre se puede verificar
+    bloqueado_('certv:' + ced + ':' + cod, 5); fallo_('certv:' + ced + ':' + cod, 3600);
+    if (fallo_('certv', 3600) === 300) alertar_('seguridad', '', 'Hubo 300 verificaciones de certificados fallidas en una hora.');
+    return { valido: false, empresa: cfg_().empresa.nombre };
+  }
+  return { valido: true, empresa: cfg_().empresa.nombre, nombre: r.nombre, cargo: r.cargo, ingreso: r.ingreso, retiro: r.retiro, estadoAlEmitir: r.estado,
+    salario: r.salario === '' ? null : +r.salario, salarioTipo: r.tipoPago === 'dia' ? 'diario' : 'mensual', vigente: r.estado === 'vinculado', fecha: r.fecha };
 }
 
 
@@ -2085,7 +2380,7 @@ function tarea_(nombre, fn) {
   _c = {}; _cfg = null;
   var lock = LockService.getScriptLock(); if (!lock.tryLock(20000)) return;
   try { fn(); } catch (e) { registrarError_('tarea:' + nombre, e); try { alertar_('error_sistema', '', 'Falló la tarea programada "' + nombre + '": ' + e.message); } catch (x) { } }
-  finally { lock.releaseLock(); }
+  finally { lock.releaseLock(); try { enviarTelegram_(); } catch (e) { } }
 }
 function unaVez_(clave, seg) { var c = CacheService.getScriptCache(); if (c.get(clave)) return false; c.put(clave, '1', seg || 21600); return true; }
 function lista_(clave, fecha) { var v = json_(prop_(clave), {}); return v.f === fecha ? v : { f: fecha, l: [] }; }
@@ -2151,7 +2446,9 @@ function tareaCada15() { tarea_('cada15', function () {
 function enviarResumenAlertas_() {
   var pend = leer('Alertas').filter(function (x) { return x.estado === 'pendiente_resumen'; });
   if (!pend.length) return;
-  var porCorreo = {}, nombres = {};
+  var porCorreo = {}, nombres = {}, cuenta = {};
+  pend.forEach(function (x) { var k = TIPOS_ALERTA[x.tipo] || x.tipo; cuenta[k] = (cuenta[k] || 0) + 1; });
+  telegram_('Resumen de alertas: ' + Object.keys(cuenta).map(function (k) { return k + ' (' + cuenta[k] + ')'; }).join(', ') + '. Detalle en el panel, sección Sistema.');
   leer('Usuarios').forEach(function (u) { nombres[u.cedula] = u.nombre; });
   pend.forEach(function (x) {
     var dest = x.enviadoA || cfg_().correoAlertas; if (!dest) return;
@@ -2236,12 +2533,16 @@ function archivarHistorico_() {
     var f = String(v[i][iF]).substr(0, 10);
     if (f && f < lim && periodoCerrado_(f)) mover.push(v[i]); else conservar.push(v[i]);
   }
+  // Al histórico solo pasa lo que sirve como soporte de nómina: sin ubicación ni foto (minimización, Ley 1581 art. 4)
+  ['lat', 'lng', 'prec', 'dist', 'foto'].forEach(function (k) { var ix = cols.indexOf(k); mover.forEach(function (r) { r[ix] = ''; }); });
+  var iM = cols.indexOf('motivo'); mover.forEach(function (r) { if (r[iM]) r[iM] = '[motivo no archivado]'; }); // texto libre: puede tener datos de salud
   if (mover.length < 100) return;
   try {
-    var carpeta = DriveApp.getFolderById(prop_('CARPETA_RESPALDOS'));
+    if (!prop_('CARPETA_HISTORICO')) { var pr = DriveApp.getFileById(ss_().getId()).getParents(), pd = pr.hasNext() ? pr.next() : DriveApp.getRootFolder(); prop_('CARPETA_HISTORICO', pd.createFolder('Control de jornada - Histórico (no borrar)').getId()); }
+    var carpeta = DriveApp.getFolderById(prop_('CARPETA_HISTORICO')); // fuera de la carpeta de respaldos: la rotación de copias no lo toca
     var nombre = 'Histórico Marcaciones ' + a.fecha.substr(0, 4) + ' - ' + c.empresa.nombre;
-    var it = carpeta.getFilesByName(nombre), archSs = it.hasNext() ? SpreadsheetApp.openById(it.next().getId()) : SpreadsheetApp.create(nombre);
-    if (!it.hasNext()) { try { DriveApp.getFileById(archSs.getId()).moveTo(carpeta); } catch (e) { } }
+    var it = carpeta.getFilesByName(nombre), existe = it.hasNext(), archSs = existe ? SpreadsheetApp.openById(it.next().getId()) : SpreadsheetApp.create(nombre);
+    if (!existe) { try { DriveApp.getFileById(archSs.getId()).moveTo(carpeta); } catch (e) { } }
     var ah = archSs.getSheetByName('Marcaciones') || archSs.insertSheet('Marcaciones');
     if (ah.getLastRow() === 0) ah.getRange(1, 1, 1, cols.length).setValues([cols]).setFontWeight('bold');
     ah.getRange(ah.getLastRow() + 1, 1, mover.length, cols.length).setValues(mover);
